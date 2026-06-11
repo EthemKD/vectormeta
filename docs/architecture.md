@@ -8,9 +8,12 @@
 - `models.py`: typed dataclasses shared by core modules
 - `limits.py`: target presets and limit resolution
 - `sizing.py`: compact UTF-8 JSON byte sizing
-- `analyzer.py`: record validation and scan reports
+- `analyzer.py`: metadata size analysis and scan reports
+- `validator.py`: preflight validation for metadata, IDs, and vectors
 - `fixer.py`: metadata cleanup and sidecar planning
-- `hydrate.py`: sidecar restoration
+- `stores.py`: content-addressed sidecar store backends
+- `upsert.py`: SDK-agnostic safe upsert wrapper
+- `hydrate.py`: sidecar restoration from files or stores
 - `io.py`: JSON, JSONL, sidecar, and overwrite-safe writes
 - `config.py`: small YAML config loader
 - `reporting.py`: human and machine report rendering

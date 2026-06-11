@@ -225,6 +225,15 @@ class SidecarPayload:
 
 
 @dataclass(frozen=True)
+class StoredSidecar:
+    """A sidecar payload written to a store."""
+
+    record_id: str
+    ref: str
+    deduplicated: bool
+
+
+@dataclass(frozen=True)
 class FixWarning:
     """A non-fatal warning produced during fixing."""
 
@@ -244,3 +253,20 @@ class FixResult:
     def changed_count(self) -> int:
         """Return how many records produced sidecar payloads."""
         return len(self.sidecars)
+
+
+@dataclass(frozen=True)
+class SafeUpsertResult:
+    """Result produced by the safe upsert wrapper."""
+
+    cleaned_records: list[Record]
+    stored_sidecars: list[StoredSidecar]
+    warnings: list[FixWarning]
+    pre_validation_report: ValidationReport | None
+    post_validation_report: ValidationReport | None
+    upsert_result: Any
+
+    @property
+    def changed_count(self) -> int:
+        """Return how many records wrote sidecar payloads."""
+        return len(self.stored_sidecars)

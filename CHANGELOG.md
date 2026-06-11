@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added `safe_upsert()` as an SDK-agnostic Python API for validation, metadata fixing,
+  sidecar persistence, and injected index upsert calls.
+- Added `FileStore` and `SQLiteStore` sidecar backends with content-addressed
+  deduplication.
+- Added `hydrate_records_from_store()` for restoring records from store-backed
+  `content_ref` values.
+
 ## 0.2.0 - 2026-06-11
 
 ### Added

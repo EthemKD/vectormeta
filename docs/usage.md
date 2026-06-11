@@ -85,6 +85,50 @@ vectormeta hydrate pinecone_ready.json \
   --out hydrated.json
 ```
 
+## Python API
+
+Use `safe_upsert()` to put validation and cleanup directly in an ingestion pipeline:
+
+```python
+from pathlib import Path
+
+from vectormeta import FileStore, safe_upsert
+
+store = FileStore(Path(".vectormeta-sidecars"))
+
+result = safe_upsert(
+    index,
+    records,
+    target="pinecone",
+    sidecar_store=store,
+    dim=1536,
+)
+```
+
+The index object is injected and must provide an upsert method compatible with:
+
+```python
+index.upsert(vectors=cleaned_records, **kwargs)
+```
+
+Use SQLite when you want a single local sidecar database:
+
+```python
+from pathlib import Path
+
+from vectormeta import SQLiteStore
+
+store = SQLiteStore(Path("vectormeta-sidecars.sqlite"))
+```
+
+Hydrate query results from a sidecar store:
+
+```python
+from vectormeta import hydrate_records_from_store
+
+hydrated = hydrate_records_from_store(matches, store=store)
+```
+
 ## Config
 
 `fix` can load a small YAML config:

@@ -83,6 +83,9 @@ sidecar JSON file      -> large text, HTML, tables, summaries, payloads
 - Sanitize sidecar filenames derived from record IDs.
 - Protect output files and sidecars from accidental overwrite.
 - Hydrate records back from sidecar references for debugging and migrations.
+- Use `safe_upsert()` from Python to validate, fix, persist sidecars, and call an
+  injected vector index client.
+- Store sidecar payloads in content-addressed local files or SQLite.
 - Keep core logic independent from Typer and Rich so it can be tested and reused.
 
 ## Tech Stack
@@ -321,6 +324,58 @@ Current MVP defaults:
 Limits and provider behavior can change. Verify official vector database documentation
 before treating any preset as a production guarantee.
 
+## Python API
+
+Use `safe_upsert()` when you want vectormeta in the ingestion path instead of as a
+separate CLI step:
+
+```python
+from pathlib import Path
+
+from vectormeta import FileStore, safe_upsert
+
+store = FileStore(Path(".vectormeta-sidecars"))
+
+result = safe_upsert(
+    index,
+    records,
+    target="pinecone",
+    sidecar_store=store,
+    dim=1536,
+    upsert_kwargs={"namespace": "docs"},
+)
+```
+
+The index object is injected. `vectormeta` expects an object with a Pinecone-style
+method such as:
+
+```python
+index.upsert(vectors=cleaned_records, **kwargs)
+```
+
+This keeps vendor SDKs optional and outside the core dependency set.
+
+To hydrate records returned from your own query path:
+
+```python
+from vectormeta import hydrate_records_from_store
+
+hydrated = hydrate_records_from_store(matches, store=store)
+```
+
+For a single-file local backend:
+
+```python
+from pathlib import Path
+
+from vectormeta import SQLiteStore
+
+store = SQLiteStore(Path("vectormeta-sidecars.sqlite"))
+```
+
+`FileStore` and `SQLiteStore` are content-addressed. Identical moved payloads are stored
+once and can be referenced by many records.
+
 ## How Metadata Reduction Works
 
 `vectormeta` sizes metadata exactly as compact UTF-8 JSON:
@@ -412,8 +467,6 @@ Expected result:
 
 Planned ideas include:
 
-- SQLite sidecar backend
-- Content-addressed sidecar deduplication
 - Streaming JSONL scan/fix
 - More provider-specific validation rules
 - S3 sidecar backend

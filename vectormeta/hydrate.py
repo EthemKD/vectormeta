@@ -10,6 +10,7 @@ from vectormeta.analyzer import get_metadata
 from vectormeta.errors import InvalidInputError
 from vectormeta.io import read_sidecar
 from vectormeta.models import HydrateMode, Record
+from vectormeta.stores import SidecarStore
 
 
 def hydrate_records(
@@ -61,6 +62,61 @@ def hydrate_record(
 
     sidecar_path = _resolve_sidecar_path(content_ref, sidecar_dir, input_base_dir)
     sidecar_payload = read_sidecar(sidecar_path)
+    content_payload = {key: value for key, value in sidecar_payload.items() if key != "id"}
+    metadata.pop(content_ref_field, None)
+
+    if mode == "metadata":
+        metadata.update(content_payload)
+    else:
+        hydrated[content_field] = content_payload
+
+    hydrated["metadata"] = metadata
+    return hydrated
+
+
+def hydrate_records_from_store(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    store: SidecarStore,
+    mode: HydrateMode = "metadata",
+    content_field: str = "payload",
+    content_ref_field: str = "content_ref",
+) -> list[Record]:
+    """Hydrate records by loading sidecar payloads from a SidecarStore."""
+    return [
+        hydrate_record_from_store(
+            record,
+            store=store,
+            mode=mode,
+            content_field=content_field,
+            content_ref_field=content_ref_field,
+        )
+        for record in records
+    ]
+
+
+def hydrate_record_from_store(
+    record: Mapping[str, Any],
+    *,
+    store: SidecarStore,
+    mode: HydrateMode = "metadata",
+    content_field: str = "payload",
+    content_ref_field: str = "content_ref",
+) -> Record:
+    """Hydrate one record from a SidecarStore content reference."""
+    if mode not in ("metadata", "content_field"):
+        raise InvalidInputError("--mode must be 'metadata' or 'content_field'.")
+
+    metadata = dict(get_metadata(record))
+    content_ref = metadata.get(content_ref_field)
+    hydrated = dict(record)
+    if content_ref is None:
+        hydrated["metadata"] = metadata
+        return hydrated
+    if not isinstance(content_ref, str) or not content_ref:
+        raise InvalidInputError(f"Metadata field '{content_ref_field}' must be a non-empty string.")
+
+    sidecar_payload = store.read(content_ref)
     content_payload = {key: value for key, value in sidecar_payload.items() if key != "id"}
     metadata.pop(content_ref_field, None)
 
