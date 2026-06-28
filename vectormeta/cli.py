@@ -15,7 +15,7 @@ from vectormeta.analyzer import analyze_records
 from vectormeta.config import load_config
 from vectormeta.errors import VectorMetaError
 from vectormeta.fixer import DEFAULT_KEEP_FIELDS, fix_records, parse_field_list
-from vectormeta.hydrate import hydrate_records
+from vectormeta.hydrate import hydrate_records, hydrate_records_from_store
 from vectormeta.io import ensure_output_writable, read_records, write_records, write_sidecars
 from vectormeta.limits import normalize_target, resolve_limit_bytes
 from vectormeta.models import FixOptions, HydrateMode, OutputFormat
@@ -27,6 +27,13 @@ from vectormeta.reporting import (
     render_validation_report,
     scan_report_to_dict,
     validation_report_to_dict,
+)
+from vectormeta.stores import (
+    FileStore,
+    SidecarStore,
+    SQLiteStore,
+    replace_content_refs,
+    write_sidecar_payloads,
 )
 from vectormeta.validator import validate_records
 
@@ -53,6 +60,14 @@ class HydrateModeOption(str, Enum):
 
     metadata = "metadata"
     content_field = "content_field"
+
+
+class SidecarStoreOption(str, Enum):
+    """Supported CLI sidecar storage backends."""
+
+    json = "json"
+    file = "file"
+    sqlite = "sqlite"
 
 
 TargetOption = Annotated[
@@ -190,8 +205,21 @@ def fix(
     limit_kb: LimitOption = None,
     sidecar: Annotated[
         Path | None,
-        typer.Option("--sidecar", help="Directory for sidecar JSON files."),
+        typer.Option(
+            "--sidecar",
+            help=(
+                "Directory for json/file sidecars, or SQLite database path when "
+                "--sidecar-store sqlite is used."
+            ),
+        ),
     ] = None,
+    sidecar_store: Annotated[
+        SidecarStoreOption,
+        typer.Option(
+            "--sidecar-store",
+            help="Sidecar backend: json, file, or sqlite.",
+        ),
+    ] = SidecarStoreOption.json,
     output_format: Annotated[
         RecordOutputFormat,
         typer.Option("--format", help="Output record format: json or jsonl."),
@@ -228,7 +256,7 @@ def fix(
         resolved_limit_kb = limit_kb if limit_kb is not None else loaded_config.limit_kb
         limit_bytes = resolve_limit_bytes(resolved_target, resolved_limit_kb)
         render_limit_warning(console, target=resolved_target, limit_bytes=limit_bytes)
-        resolved_sidecar = sidecar or loaded_config.sidecar_dir or Path("sidecar")
+        resolved_sidecar = _default_sidecar_path(sidecar, loaded_config.sidecar_dir, sidecar_store)
         resolved_ref_field = content_ref_field or loaded_config.content_ref_field or "content_ref"
         resolved_move_fields = parse_field_list(move_fields)
         if resolved_move_fields is None and loaded_config.move is not None:
@@ -256,15 +284,24 @@ def fix(
             return
 
         ensure_output_writable(out, overwrite=overwrite)
-        write_sidecars(result.sidecars, overwrite=overwrite)
+        cleaned_records = result.cleaned_records
+        if sidecar_store == SidecarStoreOption.json:
+            write_sidecars(result.sidecars, overwrite=overwrite)
+        else:
+            store = _sidecar_store(sidecar_store, resolved_sidecar)
+            stored_sidecars = write_sidecar_payloads(store, result.sidecars)
+            cleaned_records = replace_content_refs(
+                result.cleaned_records,
+                old_refs=[sidecar.ref for sidecar in result.sidecars],
+                new_refs=[stored.ref for stored in stored_sidecars],
+                content_ref_field=resolved_ref_field,
+            )
         write_records(
-            result.cleaned_records, out, _record_output_format(output_format), overwrite=overwrite
+            cleaned_records, out, _record_output_format(output_format), overwrite=overwrite
         )
         console.print(f"[green]Wrote cleaned records to {out}.[/green]")
         if result.sidecars:
-            console.print(
-                f"[green]Wrote {len(result.sidecars)} sidecar files to {resolved_sidecar}.[/green]"
-            )
+            _print_sidecar_write_summary(sidecar_store, resolved_sidecar, len(result.sidecars))
     except VectorMetaError as exc:
         _print_error(exc)
         raise typer.Exit(2) from exc
@@ -273,8 +310,24 @@ def fix(
 @app.command()
 def hydrate(
     input_path: Annotated[Path, typer.Argument(help="Cleaned JSON or JSONL vector records file.")],
-    sidecar: Annotated[Path, typer.Option("--sidecar", help="Directory containing sidecar files.")],
+    sidecar: Annotated[
+        Path,
+        typer.Option(
+            "--sidecar",
+            help=(
+                "Directory containing sidecar files, or SQLite database path when "
+                "--sidecar-store sqlite is used."
+            ),
+        ),
+    ],
     out: Annotated[Path, typer.Option("--out", help="Hydrated output records path.")],
+    sidecar_store: Annotated[
+        SidecarStoreOption,
+        typer.Option(
+            "--sidecar-store",
+            help="Sidecar backend: json, file, or sqlite.",
+        ),
+    ] = SidecarStoreOption.json,
     mode: Annotated[
         HydrateModeOption,
         typer.Option("--mode", help="Hydration mode: metadata or content_field."),
@@ -297,14 +350,23 @@ def hydrate(
     """Restore records by loading content_ref sidecar files."""
     try:
         records, input_format = read_records(input_path)
-        hydrated = hydrate_records(
-            records,
-            sidecar_dir=sidecar,
-            mode=_hydrate_mode(mode),
-            content_field=content_field,
-            content_ref_field=content_ref_field,
-            input_base_dir=input_path.parent,
-        )
+        if sidecar_store == SidecarStoreOption.json:
+            hydrated = hydrate_records(
+                records,
+                sidecar_dir=sidecar,
+                mode=_hydrate_mode(mode),
+                content_field=content_field,
+                content_ref_field=content_ref_field,
+                input_base_dir=input_path.parent,
+            )
+        else:
+            hydrated = hydrate_records_from_store(
+                records,
+                store=_sidecar_store(sidecar_store, sidecar),
+                mode=_hydrate_mode(mode),
+                content_field=content_field,
+                content_ref_field=content_ref_field,
+            )
         output_format: OutputFormat = "jsonl" if input_format == "jsonl" else "json"
         write_records(hydrated, out, output_format, overwrite=overwrite)
         console.print(f"[green]Wrote hydrated records to {out}.[/green]")
@@ -329,6 +391,45 @@ def _record_output_format(output_format: RecordOutputFormat) -> OutputFormat:
 
 def _hydrate_mode(mode: HydrateModeOption) -> HydrateMode:
     return "content_field" if mode == HydrateModeOption.content_field else "metadata"
+
+
+def _default_sidecar_path(
+    sidecar: Path | None,
+    config_sidecar: Path | None,
+    store_option: SidecarStoreOption,
+) -> Path:
+    if sidecar is not None:
+        return sidecar
+    if config_sidecar is not None:
+        return config_sidecar
+    if store_option == SidecarStoreOption.sqlite:
+        return Path("sidecar.sqlite")
+    return Path("sidecar")
+
+
+def _sidecar_store(store_option: SidecarStoreOption, path: Path) -> SidecarStore:
+    if store_option == SidecarStoreOption.file:
+        return FileStore(path)
+    if store_option == SidecarStoreOption.sqlite:
+        return SQLiteStore(path)
+    raise ValueError("json sidecar backend does not use SidecarStore")
+
+
+def _print_sidecar_write_summary(
+    store_option: SidecarStoreOption,
+    sidecar_path: Path,
+    count: int,
+) -> None:
+    if store_option == SidecarStoreOption.json:
+        console.print(f"[green]Wrote {count} sidecar files to {sidecar_path}.[/green]")
+    elif store_option == SidecarStoreOption.file:
+        console.print(
+            f"[green]Stored {count} content-addressed sidecar refs in {sidecar_path}.[/green]"
+        )
+    else:
+        console.print(
+            f"[green]Stored {count} content-addressed sidecar refs in {sidecar_path}.[/green]"
+        )
 
 
 if __name__ == "__main__":

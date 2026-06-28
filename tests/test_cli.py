@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -194,3 +195,98 @@ def test_fix_and_hydrate_cli_round_trip(tmp_path: Path) -> None:
     assert ready_path.exists()
     assert (sidecar_path / "doc.json").exists()
     assert "chunk_text" in hydrated_path.read_text(encoding="utf-8")
+
+
+def test_fix_and_hydrate_cli_round_trip_with_sqlite_store(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.json"
+    ready_path = tmp_path / "ready.json"
+    hydrated_path = tmp_path / "hydrated.json"
+    sqlite_path = tmp_path / "sidecars.sqlite"
+    input_path.write_text(
+        '[{"id":"doc","values":[0.1],"metadata":{"source":"paper.pdf","chunk_text":"payload"}}]',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    fix_result = runner.invoke(
+        app,
+        [
+            "fix",
+            str(input_path),
+            "--target",
+            "pinecone",
+            "--sidecar-store",
+            "sqlite",
+            "--sidecar",
+            str(sqlite_path),
+            "--out",
+            str(ready_path),
+        ],
+    )
+    hydrate_result = runner.invoke(
+        app,
+        [
+            "hydrate",
+            str(ready_path),
+            "--sidecar-store",
+            "sqlite",
+            "--sidecar",
+            str(sqlite_path),
+            "--out",
+            str(hydrated_path),
+        ],
+    )
+
+    ready = json.loads(ready_path.read_text(encoding="utf-8"))
+    assert fix_result.exit_code == 0
+    assert hydrate_result.exit_code == 0
+    assert sqlite_path.exists()
+    assert ready[0]["metadata"]["content_ref"].startswith("sqlite:")
+    assert "chunk_text" in hydrated_path.read_text(encoding="utf-8")
+
+
+def test_fix_with_file_store_deduplicates_repeated_payloads(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.json"
+    ready_path = tmp_path / "ready.json"
+    sidecar_path = tmp_path / "content-sidecars"
+    input_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "doc-1",
+                    "values": [0.1],
+                    "metadata": {"source": "paper.pdf", "raw_html": "<p>same</p>"},
+                },
+                {
+                    "id": "doc-2",
+                    "values": [0.2],
+                    "metadata": {"source": "paper.pdf", "raw_html": "<p>same</p>"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "fix",
+            str(input_path),
+            "--target",
+            "pinecone",
+            "--sidecar-store",
+            "file",
+            "--sidecar",
+            str(sidecar_path),
+            "--out",
+            str(ready_path),
+        ],
+    )
+
+    ready = json.loads(ready_path.read_text(encoding="utf-8"))
+    refs = [record["metadata"]["content_ref"] for record in ready]
+    assert result.exit_code == 0
+    assert refs[0] == refs[1]
+    assert refs[0].startswith("file:")
+    assert len(list(sidecar_path.glob("*.json"))) == 1

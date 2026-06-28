@@ -125,6 +125,10 @@ from the same document move the same `raw_html` value, the store can keep one pa
 reference it from many cleaned records. The payload hash ignores the record `id`, so
 chunks with different IDs can still share identical moved content.
 
+Use `migrate_sidecars_to_store()` to rewrite existing per-record JSON `content_ref`
+values into `FileStore` or `SQLiteStore` references without changing the filterable
+metadata on each record.
+
 ## Large File Policy
 
 JSON arrays and JSONL files are currently loaded into memory before scanning or fixing.
@@ -151,6 +155,8 @@ path traversal risk while avoiding accidental hydration from the wrong sidecar f
 
 For store-backed sidecars, `hydrate_records_from_store()` resolves `content_ref` through
 the provided `FileStore` or `SQLiteStore` instead of reading from a sidecar directory.
+`hydrate_results()` provides the same restoration behavior for query-match mappings and
+common SDK match objects.
 
 ## Correctness Checks
 
@@ -176,6 +182,7 @@ The test suite covers:
 - CLI validate exit codes and JSON output.
 - FileStore and SQLiteStore sidecar deduplication.
 - Store-backed hydration.
+- Legacy JSON sidecar migration.
 - Safe upsert validation, fixing, sidecar persistence, and injected index calls.
 
 The local acceptance workflow also verifies that the included oversized example becomes

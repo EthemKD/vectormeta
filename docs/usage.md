@@ -69,6 +69,26 @@ Preview without writing:
 vectormeta fix chunks.json --target pinecone --sidecar ./sidecar --out ready.json --dry-run
 ```
 
+Use content-addressed local files:
+
+```bash
+vectormeta fix chunks.json \
+  --target pinecone \
+  --sidecar-store file \
+  --sidecar ./.vectormeta-sidecars \
+  --out ready.json
+```
+
+Use a single SQLite database:
+
+```bash
+vectormeta fix chunks.json \
+  --target pinecone \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
+  --out ready.json
+```
+
 ## Hydrate
 
 ```bash
@@ -82,6 +102,15 @@ vectormeta hydrate pinecone_ready.json \
   --sidecar ./sidecar \
   --mode content_field \
   --content-field payload \
+  --out hydrated.json
+```
+
+Hydrate from SQLite:
+
+```bash
+vectormeta hydrate ready.json \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
   --out hydrated.json
 ```
 
@@ -105,6 +134,17 @@ result = safe_upsert(
 )
 ```
 
+Useful result counters include:
+
+```python
+result.total_records
+result.stored_count
+result.deduplicated_count
+result.warning_count
+result.pre_error_count
+result.post_error_count
+```
+
 The index object is injected and must provide an upsert method compatible with:
 
 ```python
@@ -121,12 +161,31 @@ from vectormeta import SQLiteStore
 store = SQLiteStore(Path("vectormeta-sidecars.sqlite"))
 ```
 
-Hydrate query results from a sidecar store:
+Hydrate query matches from a sidecar store:
 
 ```python
-from vectormeta import hydrate_records_from_store
+from vectormeta import hydrate_results
 
-hydrated = hydrate_records_from_store(matches, store=store)
+response = index.query(vector=query_vector, top_k=5)
+hydrated = hydrate_results(response["matches"], sidecar_store=store)
+```
+
+`hydrate_results()` accepts mappings and common SDK objects with `metadata` attributes.
+
+Migrate existing per-record JSON sidecars into a content-addressed store:
+
+```python
+from pathlib import Path
+
+from vectormeta import FileStore, migrate_sidecars_to_store
+
+store = FileStore(Path(".vectormeta-sidecars"))
+result = migrate_sidecars_to_store(
+    cleaned_records,
+    sidecar_dir=Path("sidecar"),
+    input_base_dir=Path("."),
+    store=store,
+)
 ```
 
 ## Config

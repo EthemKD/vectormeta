@@ -16,7 +16,12 @@ from vectormeta.models import (
     ValidationIssue,
     ValidationReport,
 )
-from vectormeta.stores import SidecarStore
+from vectormeta.stores import (
+    SidecarStore,
+    planned_sidecar_refs,
+    replace_content_refs,
+    write_sidecar_payloads,
+)
 from vectormeta.validator import validate_records
 
 
@@ -72,14 +77,11 @@ def safe_upsert(
         ),
     )
 
-    stored_sidecars = [
-        sidecar_store.write(record_id=sidecar.record_id, payload=sidecar.payload)
-        for sidecar in fix_result.sidecars
-    ]
-    cleaned_records = _replace_content_refs(
+    final_refs = planned_sidecar_refs(sidecar_store, fix_result.sidecars)
+    cleaned_records = replace_content_refs(
         fix_result.cleaned_records,
         old_refs=[sidecar.ref for sidecar in fix_result.sidecars],
-        new_refs=[stored.ref for stored in stored_sidecars],
+        new_refs=final_refs,
         content_ref_field=content_ref_field,
     )
 
@@ -95,6 +97,7 @@ def safe_upsert(
         if blocking_errors and not force:
             raise ValidationFailedError(_validation_error_message(blocking_errors))
 
+    stored_sidecars = write_sidecar_payloads(sidecar_store, fix_result.sidecars)
     upsert_result = index.upsert(vectors=cleaned_records, **dict(upsert_kwargs or {}))
     return SafeUpsertResult(
         cleaned_records=cleaned_records,
@@ -104,26 +107,6 @@ def safe_upsert(
         post_validation_report=post_validation_report,
         upsert_result=upsert_result,
     )
-
-
-def _replace_content_refs(
-    records: list[Record],
-    *,
-    old_refs: list[str],
-    new_refs: list[str],
-    content_ref_field: str,
-) -> list[Record]:
-    ref_map = dict(zip(old_refs, new_refs, strict=True))
-    updated: list[Record] = []
-    for record in records:
-        record_copy = dict(record)
-        metadata = dict(record_copy.get("metadata", {}))
-        existing_ref = metadata.get(content_ref_field)
-        if isinstance(existing_ref, str) and existing_ref in ref_map:
-            metadata[content_ref_field] = ref_map[existing_ref]
-        record_copy["metadata"] = metadata
-        updated.append(record_copy)
-    return updated
 
 
 def _blocking_errors(

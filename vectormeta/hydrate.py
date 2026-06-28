@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from vectormeta.analyzer import get_metadata
+from vectormeta.analyzer import get_metadata, get_record_id
 from vectormeta.errors import InvalidInputError
 from vectormeta.io import read_sidecar
-from vectormeta.models import HydrateMode, Record
+from vectormeta.models import HydrateMode, Record, SidecarMigrationResult, StoredSidecar
 from vectormeta.stores import SidecarStore
+
+
+class MatchObject(Protocol):
+    """Minimal object shape accepted by hydrate_results."""
+
+    metadata: Mapping[str, Any]
 
 
 def hydrate_records(
@@ -95,6 +101,64 @@ def hydrate_records_from_store(
     ]
 
 
+def hydrate_results(
+    matches: Iterable[Mapping[str, Any] | MatchObject],
+    *,
+    sidecar_store: SidecarStore,
+    mode: HydrateMode = "metadata",
+    content_field: str = "payload",
+    content_ref_field: str = "content_ref",
+) -> list[Record]:
+    """Hydrate vector query matches returned as mappings or SDK objects."""
+    records = [_match_to_record(match) for match in matches]
+    return hydrate_records_from_store(
+        records,
+        store=sidecar_store,
+        mode=mode,
+        content_field=content_field,
+        content_ref_field=content_ref_field,
+    )
+
+
+def migrate_sidecars_to_store(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    sidecar_dir: Path,
+    store: SidecarStore,
+    content_ref_field: str = "content_ref",
+    input_base_dir: Path | None = None,
+) -> SidecarMigrationResult:
+    """Migrate legacy JSON sidecar references into a SidecarStore."""
+    migrated_records: list[Record] = []
+    stored_sidecars: list[StoredSidecar] = []
+
+    for record in records:
+        metadata = dict(get_metadata(record))
+        content_ref = metadata.get(content_ref_field)
+        migrated_record = dict(record)
+        if content_ref is None:
+            migrated_record["metadata"] = metadata
+            migrated_records.append(migrated_record)
+            continue
+        if not isinstance(content_ref, str) or not content_ref:
+            raise InvalidInputError(
+                f"Metadata field '{content_ref_field}' must be a non-empty string."
+            )
+
+        sidecar_path = _resolve_sidecar_path(content_ref, sidecar_dir, input_base_dir)
+        payload = read_sidecar(sidecar_path)
+        stored = store.write(record_id=get_record_id(record), payload=payload)
+        metadata[content_ref_field] = stored.ref
+        migrated_record["metadata"] = metadata
+        migrated_records.append(migrated_record)
+        stored_sidecars.append(stored)
+
+    return SidecarMigrationResult(
+        records=migrated_records,
+        stored_sidecars=stored_sidecars,
+    )
+
+
 def hydrate_record_from_store(
     record: Mapping[str, Any],
     *,
@@ -127,6 +191,37 @@ def hydrate_record_from_store(
 
     hydrated["metadata"] = metadata
     return hydrated
+
+
+def _match_to_record(match: Mapping[str, Any] | MatchObject) -> Record:
+    if isinstance(match, Mapping):
+        return dict(match)
+
+    model_dump = getattr(match, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, Mapping):
+            return dict(dumped)
+
+    to_dict = getattr(match, "to_dict", None)
+    if callable(to_dict):
+        dumped = to_dict()
+        if isinstance(dumped, Mapping):
+            return dict(dumped)
+
+    record: Record = {"metadata": dict(match.metadata)}
+    for field_name in (
+        "id",
+        "_id",
+        "values",
+        "vector",
+        "embedding",
+        "score",
+        "sparse_values",
+    ):
+        if hasattr(match, field_name):
+            record[field_name] = getattr(match, field_name)
+    return record
 
 
 def _resolve_sidecar_path(

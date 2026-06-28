@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from vectormeta.errors import SidecarStoreError
-from vectormeta.stores import FileStore, SQLiteStore
+from vectormeta.stores import FileStore, SidecarStore, SQLiteStore
+
+StoreFactory = Callable[[Path], SidecarStore]
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        pytest.param(lambda root: FileStore(root / "sidecars"), id="file"),
+        pytest.param(lambda root: SQLiteStore(root / "sidecars.sqlite"), id="sqlite"),
+    ],
+)
+def test_sidecar_store_contract(tmp_path: Path, store_factory: StoreFactory) -> None:
+    store = store_factory(tmp_path)
+    first_payload = {"id": "doc-1", "chunk_text": "same"}
+    second_payload = {"id": "doc-2", "chunk_text": "same"}
+
+    planned_ref = store.ref_for(first_payload)
+    first = store.write(record_id="doc-1", payload=first_payload)
+    second = store.write(record_id="doc-2", payload=second_payload)
+
+    assert first.ref == planned_ref
+    assert second.ref == planned_ref
+    assert first.deduplicated is False
+    assert second.deduplicated is True
+    assert store.read(planned_ref) == {"chunk_text": "same"}
 
 
 def test_file_store_deduplicates_payloads_by_content(tmp_path: Path) -> None:

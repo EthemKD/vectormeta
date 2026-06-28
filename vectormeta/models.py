@@ -270,3 +270,55 @@ class SafeUpsertResult:
     def changed_count(self) -> int:
         """Return how many records wrote sidecar payloads."""
         return len(self.stored_sidecars)
+
+    @property
+    def total_records(self) -> int:
+        """Return how many cleaned records were passed to upsert."""
+        return len(self.cleaned_records)
+
+    @property
+    def stored_count(self) -> int:
+        """Return how many sidecar references were written or reused."""
+        return len(self.stored_sidecars)
+
+    @property
+    def deduplicated_count(self) -> int:
+        """Return how many sidecar writes reused an existing payload."""
+        return sum(sidecar.deduplicated for sidecar in self.stored_sidecars)
+
+    @property
+    def warning_count(self) -> int:
+        """Return how many fixer warnings were produced."""
+        return len(self.warnings)
+
+    @property
+    def pre_error_count(self) -> int:
+        """Return pre-fix validation error count when validation ran."""
+        if self.pre_validation_report is None:
+            return 0
+        return self.pre_validation_report.error_count
+
+    @property
+    def post_error_count(self) -> int:
+        """Return post-fix validation error count when validation ran."""
+        if self.post_validation_report is None:
+            return 0
+        return self.post_validation_report.error_count
+
+
+@dataclass(frozen=True)
+class SidecarMigrationResult:
+    """Result of migrating legacy JSON sidecars into a SidecarStore."""
+
+    records: list[Record]
+    stored_sidecars: list[StoredSidecar]
+
+    @property
+    def migrated_count(self) -> int:
+        """Return how many record references were migrated."""
+        return len(self.stored_sidecars)
+
+    @property
+    def deduplicated_count(self) -> int:
+        """Return how many migrations reused an existing payload."""
+        return sum(sidecar.deduplicated for sidecar in self.stored_sidecars)
