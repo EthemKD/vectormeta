@@ -83,6 +83,9 @@ sidecar JSON file      -> large text, HTML, tables, summaries, payloads
 - Sanitize sidecar filenames derived from record IDs.
 - Protect output files and sidecars from accidental overwrite.
 - Hydrate records back from sidecar references for debugging and migrations.
+- Use `safe_upsert()` from Python to validate, fix, persist sidecars, and call an
+  injected vector index client.
+- Store sidecar payloads in content-addressed local files or SQLite.
 - Keep core logic independent from Typer and Rich so it can be tested and reused.
 
 ## Tech Stack
@@ -103,6 +106,12 @@ Install from PyPI:
 
 ```bash
 pip install vectormeta
+```
+
+Install with the optional Pinecone SDK:
+
+```bash
+pip install "vectormeta[pinecone]"
 ```
 
 Check the CLI:
@@ -276,6 +285,26 @@ vectormeta fix chunks.json --target pinecone --sidecar ./sidecar --out ready.jso
 
 `fix` does not overwrite files unless `--overwrite` is passed.
 
+Use content-addressed sidecars from the CLI:
+
+```bash
+vectormeta fix chunks.json \
+  --target pinecone \
+  --sidecar-store file \
+  --sidecar ./.vectormeta-sidecars \
+  --out ready.json
+```
+
+Use a single SQLite sidecar database:
+
+```bash
+vectormeta fix chunks.json \
+  --target pinecone \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
+  --out ready.json
+```
+
 If your input metadata already contains `content_ref`, choose another reference field:
 
 ```bash
@@ -290,6 +319,15 @@ vectormeta fix chunks.json \
 
 ```bash
 vectormeta hydrate pinecone_ready.json --sidecar ./sidecar --out hydrated.json
+```
+
+Hydrate from a SQLite sidecar database:
+
+```bash
+vectormeta hydrate ready.json \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
+  --out hydrated.json
 ```
 
 Hydrate sidecar content into a separate record field:
@@ -320,6 +358,83 @@ Current MVP defaults:
 
 Limits and provider behavior can change. Verify official vector database documentation
 before treating any preset as a production guarantee.
+
+## Python API
+
+Use `safe_upsert()` when you want vectormeta in the ingestion path instead of as a
+separate CLI step:
+
+```python
+from pathlib import Path
+
+from vectormeta import FileStore, safe_upsert
+
+store = FileStore(Path(".vectormeta-sidecars"))
+
+result = safe_upsert(
+    index,
+    records,
+    target="pinecone",
+    sidecar_store=store,
+    dim=1536,
+    upsert_kwargs={"namespace": "docs"},
+)
+```
+
+The result exposes useful ingestion counters:
+
+```python
+result.total_records
+result.stored_count
+result.deduplicated_count
+result.warning_count
+result.pre_error_count
+result.post_error_count
+```
+
+The index object is injected. `vectormeta` expects an object with a Pinecone-style
+method such as:
+
+```python
+index.upsert(vectors=cleaned_records, **kwargs)
+```
+
+This keeps vendor SDKs optional and outside the core dependency set.
+
+To hydrate matches returned from your own query path:
+
+```python
+from vectormeta import hydrate_results
+
+response = index.query(vector=query_vector, top_k=5)
+hydrated = hydrate_results(response["matches"], sidecar_store=store)
+```
+
+For a single-file local backend:
+
+```python
+from pathlib import Path
+
+from vectormeta import SQLiteStore
+
+store = SQLiteStore(Path("vectormeta-sidecars.sqlite"))
+```
+
+`FileStore` and `SQLiteStore` are content-addressed. Identical moved payloads are stored
+once and can be referenced by many records.
+
+Migrate legacy per-record JSON sidecars into a content-addressed store:
+
+```python
+from vectormeta import migrate_sidecars_to_store
+
+migration = migrate_sidecars_to_store(
+    cleaned_records,
+    sidecar_dir=Path("sidecar"),
+    input_base_dir=Path("."),
+    store=store,
+)
+```
 
 ## How Metadata Reduction Works
 
@@ -396,10 +511,11 @@ Expected result:
 
 ## Limitations
 
-- Local JSON sidecars only. Keep the cleaned output file and sidecar directory together;
-  the MVP does not provide an atomic database-backed sidecar store.
-- Sidecars are one file per changed record. The MVP does not deduplicate repeated fields
-  such as shared `raw_html` across chunks from the same document.
+- The default CLI sidecar mode is local JSON files. Keep cleaned output files and their
+  sidecar location together unless you opt into `--sidecar-store file` or
+  `--sidecar-store sqlite`.
+- Store-backed sidecars deduplicate identical moved payloads, but distributed/cloud
+  stores such as S3 are not included yet.
 - Input support is JSON arrays and JSONL records, but files are currently read into
   memory. Streaming JSONL scan/fix is planned for larger embedding datasets.
 - Vector validation covers dense numeric vector lists and dimensions. It does not infer
@@ -412,8 +528,6 @@ Expected result:
 
 Planned ideas include:
 
-- SQLite sidecar backend
-- Content-addressed sidecar deduplication
 - Streaming JSONL scan/fix
 - More provider-specific validation rules
 - S3 sidecar backend

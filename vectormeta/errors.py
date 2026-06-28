@@ -21,3 +21,11 @@ class SidecarConflictError(VectorMetaError):
 
 class OutputExistsError(VectorMetaError):
     """Raised when an output file exists and overwrite was not enabled."""
+
+
+class ValidationFailedError(VectorMetaError):
+    """Raised when validation errors would make a safe upsert unsafe."""
+
+
+class SidecarStoreError(VectorMetaError):
+    """Raised when a sidecar store cannot write or read payloads."""

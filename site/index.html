@@ -6,7 +6,7 @@
     <title>vectormeta | Stop vector DB metadata limit errors</title>
     <meta
       name="description"
-      content="vectormeta scans and validates vector records, finds oversized metadata, and moves heavy fields into sidecar JSON files before vector database upsert."
+      content="vectormeta scans and validates vector records, moves oversized metadata into sidecar stores, and offers safe upsert helpers for vector database ingestion."
     />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -92,15 +92,15 @@
     <main id="top">
       <section class="hero section-band">
         <div class="hero-copy">
-          <p class="version-pill"><span></span> v0.2.0 - MIT License</p>
+          <p class="version-pill"><span></span> v0.3.0 - MIT License</p>
           <h1>
             Stop vector DB metadata
             <span class="accent-text">limit errors</span> before upsert.
           </h1>
           <p class="lede">
-            Scan JSON/JSONL records, validate upsert readiness, and move heavy payloads
-            to sidecar files while keeping vector metadata small and filterable for your
-            upload pipeline.
+            Scan JSON/JSONL records, validate upsert readiness, move heavy payloads
+            to sidecar stores, and use safe_upsert from Python for cleaner ingestion
+            pipelines.
           </p>
           <div class="actions center">
             <a class="button button-primary" href="#workflow">See workflow</a>
@@ -113,7 +113,7 @@
             <span class="dot red"></span>
             <span class="dot amber"></span>
             <span class="dot green"></span>
-            <span>vectormeta - scan + validate + fix + hydrate</span>
+            <span>vectormeta - scan + validate + fix + safe_upsert</span>
           </div>
           <div class="terminal-body">
             <p><span class="prompt">$</span> vectormeta scan records.json --target pinecone</p>
@@ -125,10 +125,8 @@
             <p class="gap"><span class="prompt">$</span> vectormeta validate records.json --target pinecone --dim 1536</p>
             <p class="muted">Records validated: 2  /  <span class="danger">Errors: 1</span></p>
             <p class="muted indent">metadata_too_large -> doc_123_chunk_4</p>
-            <p class="gap"><span class="prompt">$</span> vectormeta fix records.json --target pinecone --sidecar ./sidecar --out ready.json</p>
-            <p class="success">Fix summary: updated 2 records; 2 records have sidecar payloads.</p>
-            <p class="gap"><span class="prompt">$</span> vectormeta validate ready.json --target pinecone --dim 1536</p>
-            <p class="success">No validation issues found.<span class="cursor"></span></p>
+            <p class="gap"><span class="prompt">$</span> vectormeta fix records.json --target pinecone --sidecar-store sqlite --sidecar sidecars.sqlite --out ready.json</p>
+            <p class="success">Fix summary: updated 2 records; stored content-addressed sidecar refs.<span class="cursor"></span></p>
           </div>
         </div>
       </section>
@@ -139,7 +137,7 @@
           <h2>Move storage-heavy payloads out of filterable metadata.</h2>
           <p>
             vectormeta keeps source, page, doc_id, and tags in the vector DB record, then
-            writes text, HTML, tables, and summaries to local sidecar JSON.
+            writes text, HTML, tables, and summaries to JSON, file, or SQLite sidecars.
           </p>
         </div>
 
@@ -179,11 +177,11 @@
     <span class="key">"source"</span>: <span class="val">"paper.pdf"</span>,
     <span class="key">"page"</span>: <span class="number">12</span>,
     <span class="key">"doc_id"</span>: <span class="val">"doc_123"</span>,
-    <span class="key">"content_ref"</span>: <span class="val">"sidecar/doc_123_chunk_4.json"</span>
+    <span class="key">"content_ref"</span>: <span class="val">"sqlite:8eb2..."</span>
   }
 }
 
-<span class="comment">// sidecar/doc_123_chunk_4.json</span>
+<span class="comment">// SQLite/FileStore payload</span>
 {
   <span class="key">"id"</span>: <span class="val">"doc_123_chunk_4"</span>,
   <span class="key">"chunk_text"</span>: <span class="val">"55 KB of text..."</span>,
@@ -197,7 +195,7 @@
       <section id="workflow" class="section-band workflow-band">
         <div class="section-heading">
           <p class="eyebrow">Workflow</p>
-          <h2>Four commands. No blind truncation.</h2>
+          <h2>CLI checks plus Python safe upsert.</h2>
           <p>
             Use it locally before upsert, or wire it into CI as a validation and metadata
             hygiene gate.
@@ -368,6 +366,9 @@
           <span>Rich output</span>
           <span>Pydantic config</span>
           <span>Preflight validation</span>
+          <span>safe_upsert API</span>
+          <span>SQLite sidecars</span>
+          <span>Content deduplication</span>
           <span>JSON + JSONL</span>
           <span>Pytest tests</span>
           <span>Ruff linting</span>
@@ -375,13 +376,13 @@
           <span>GitHub Actions CI</span>
           <span>Overwrite protection</span>
           <span>Path traversal checks</span>
-          <span>Local-only sidecars</span>
+          <span>Store-backed sidecars</span>
         </div>
       </section>
 
       <section class="cta">
         <h2>Use vectormeta before your next vector DB upsert.</h2>
-        <p>Install from PyPI, scan and validate your records, and catch metadata issues early.</p>
+        <p>Install from PyPI, scan and validate your records, or add safe_upsert to ingestion code.</p>
         <div class="install-command">
           <code><span>$</span> pip install vectormeta</code>
           <button type="button" class="copy-button" aria-label="Copy install command">
@@ -428,7 +429,7 @@
     <footer class="footer">
       <strong class="footer-version">
         <span class="release-icon" aria-hidden="true"></span>
-        vectormeta 0.2.0
+        vectormeta 0.3.0
       </strong>
       <nav aria-label="Footer navigation">
         <a href="https://github.com/Achal13jain/vectormeta/blob/main/docs/architecture.md"

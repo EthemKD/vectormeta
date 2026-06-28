@@ -111,15 +111,23 @@ Sidecar behavior is designed to avoid common filesystem mistakes:
 
 ## Sidecar Policy
 
-The MVP writes one sidecar JSON file per changed record. It does not deduplicate repeated
-payload fields across chunks. For example, if 20 chunks from the same document each move
-the same `raw_html` value, the current local JSON sidecar backend stores that value 20
-times.
+The CLI `fix` command writes one sidecar JSON file per changed record. This keeps the
+file-based scan/fix/hydrate workflow simple and predictable: every cleaned record points
+to one sidecar file that contains the fields removed from that record.
 
-This policy keeps hydration simple and predictable: every cleaned record points to one
-sidecar file that contains the fields removed from that record. Future backends can add
-content-addressed deduplication or a SQLite sidecar store without changing the basic
-scan/fix/hydrate workflow.
+The Python API also provides store-backed sidecars:
+
+- `FileStore` writes content-addressed JSON payloads to a local directory.
+- `SQLiteStore` writes content-addressed payloads to a local SQLite database.
+
+Store-backed sidecars deduplicate identical moved payloads. For example, if 20 chunks
+from the same document move the same `raw_html` value, the store can keep one payload and
+reference it from many cleaned records. The payload hash ignores the record `id`, so
+chunks with different IDs can still share identical moved content.
+
+Use `migrate_sidecars_to_store()` to rewrite existing per-record JSON `content_ref`
+values into `FileStore` or `SQLiteStore` references without changing the filterable
+metadata on each record.
 
 ## Large File Policy
 
@@ -145,6 +153,11 @@ directory segment and resolve `subdir/doc.json` inside the provided sidecar dire
 It does not fall back to a bare filename before trying the nested path. This reduces
 path traversal risk while avoiding accidental hydration from the wrong sidecar file.
 
+For store-backed sidecars, `hydrate_records_from_store()` resolves `content_ref` through
+the provided `FileStore` or `SQLiteStore` instead of reading from a sidecar directory.
+`hydrate_results()` provides the same restoration behavior for query-match mappings and
+common SDK match objects.
+
 ## Correctness Checks
 
 The test suite covers:
@@ -167,6 +180,10 @@ The test suite covers:
 - Validation of duplicate/missing IDs.
 - Validation of vector dimensions and invalid vector values.
 - CLI validate exit codes and JSON output.
+- FileStore and SQLiteStore sidecar deduplication.
+- Store-backed hydration.
+- Legacy JSON sidecar migration.
+- Safe upsert validation, fixing, sidecar persistence, and injected index calls.
 
 The local acceptance workflow also verifies that the included oversized example becomes
 small enough after fixing:

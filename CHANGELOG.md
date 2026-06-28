@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.0 - 2026-06-28
+
+### Added
+
+- Added `safe_upsert()` as an SDK-agnostic Python API for validation, metadata fixing,
+  sidecar persistence, and injected index upsert calls.
+- Added `FileStore` and `SQLiteStore` sidecar backends with content-addressed
+  deduplication.
+- Added `hydrate_records_from_store()` and `hydrate_results()` for restoring records or
+  query matches from store-backed `content_ref` values.
+- Added `--sidecar-store file|sqlite` to `fix` and `hydrate` for content-addressed CLI
+  sidecar backends.
+- Added `migrate_sidecars_to_store()` for moving legacy per-record JSON sidecars into a
+  content-addressed backend.
+
 ## 0.2.0 - 2026-06-11
 
 ### Added
