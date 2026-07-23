@@ -89,6 +89,20 @@ vectormeta fix chunks.json \
   --out ready.json
 ```
 
+Stream JSONL records without loading the full file into memory:
+
+```bash
+vectormeta fix chunks.jsonl \
+  --target pinecone \
+  --stream \
+  --format jsonl \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
+  --out ready.jsonl
+```
+
+The streaming mode is currently scoped to JSONL input and JSONL output.
+
 ## Hydrate
 
 ```bash

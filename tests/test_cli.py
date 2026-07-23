@@ -290,3 +290,80 @@ def test_fix_with_file_store_deduplicates_repeated_payloads(tmp_path: Path) -> N
     assert refs[0] == refs[1]
     assert refs[0].startswith("file:")
     assert len(list(sidecar_path.glob("*.json"))) == 1
+
+
+def test_fix_streaming_jsonl_with_sqlite_store_deduplicates_payloads(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    ready_path = tmp_path / "ready.jsonl"
+    sqlite_path = tmp_path / "sidecars.sqlite"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": "doc-1",
+                        "values": [0.1],
+                        "metadata": {"source": "paper.pdf", "raw_html": "<p>same</p>"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": "doc-2",
+                        "values": [0.2],
+                        "metadata": {"source": "paper.pdf", "raw_html": "<p>same</p>"},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "fix",
+            str(input_path),
+            "--target",
+            "pinecone",
+            "--stream",
+            "--format",
+            "jsonl",
+            "--sidecar-store",
+            "sqlite",
+            "--sidecar",
+            str(sqlite_path),
+            "--out",
+            str(ready_path),
+        ],
+    )
+
+    lines = [json.loads(line) for line in ready_path.read_text(encoding="utf-8").splitlines()]
+    refs = [record["metadata"]["content_ref"] for record in lines]
+    assert result.exit_code == 0
+    assert "Metadata reduction" in result.output
+    assert "deduplicated refs: 1" in result.output
+    assert refs[0] == refs[1]
+    assert refs[0].startswith("sqlite:")
+
+
+def test_fix_streaming_requires_jsonl_output(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    ready_path = tmp_path / "ready.json"
+    input_path.write_text('{"id":"doc","metadata":{"chunk_text":"payload"}}\n', encoding="utf-8")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "fix",
+            str(input_path),
+            "--stream",
+            "--out",
+            str(ready_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--stream requires --format jsonl" in result.output

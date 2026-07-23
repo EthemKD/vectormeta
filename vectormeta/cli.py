@@ -13,12 +13,19 @@ from rich.console import Console
 from vectormeta import __version__
 from vectormeta.analyzer import analyze_records
 from vectormeta.config import load_config
-from vectormeta.errors import VectorMetaError
-from vectormeta.fixer import DEFAULT_KEEP_FIELDS, fix_records, parse_field_list
+from vectormeta.errors import InvalidInputError, VectorMetaError
+from vectormeta.fixer import DEFAULT_KEEP_FIELDS, fix_records, fix_records_iter, parse_field_list
 from vectormeta.hydrate import hydrate_records, hydrate_records_from_store
-from vectormeta.io import ensure_output_writable, read_records, write_records, write_sidecars
+from vectormeta.io import (
+    detect_input_format,
+    ensure_output_writable,
+    iter_jsonl_records,
+    read_records,
+    write_records,
+    write_sidecars,
+)
 from vectormeta.limits import normalize_target, resolve_limit_bytes
-from vectormeta.models import FixOptions, HydrateMode, OutputFormat
+from vectormeta.models import FixOptions, FixSavings, FixWarning, HydrateMode, OutputFormat, Record
 from vectormeta.reporting import (
     render_fix_summary,
     render_limit_warning,
@@ -228,6 +235,13 @@ def fix(
         bool,
         typer.Option("--dry-run", help="Plan changes without writing output or sidecars."),
     ] = False,
+    stream: Annotated[
+        bool,
+        typer.Option(
+            "--stream",
+            help="Process JSONL input and output one record at a time. Requires --format jsonl.",
+        ),
+    ] = False,
     move_fields: Annotated[
         str | None,
         typer.Option("--move-fields", help="Comma-separated metadata fields to move."),
@@ -265,19 +279,30 @@ def fix(
         if resolved_keep_fields is None:
             resolved_keep_fields = tuple(loaded_config.keep or DEFAULT_KEEP_FIELDS)
 
-        records, _ = read_records(input_path)
-        result = fix_records(
-            records,
-            FixOptions(
-                target=resolved_target,
-                limit_bytes=limit_bytes,
-                sidecar_dir=resolved_sidecar,
-                output_path=out,
-                move_fields=resolved_move_fields,
-                keep_fields=resolved_keep_fields,
-                content_ref_field=resolved_ref_field,
-            ),
+        fix_options = FixOptions(
+            target=resolved_target,
+            limit_bytes=limit_bytes,
+            sidecar_dir=resolved_sidecar,
+            output_path=out,
+            move_fields=resolved_move_fields,
+            keep_fields=resolved_keep_fields,
+            content_ref_field=resolved_ref_field,
         )
+        if stream:
+            _fix_streaming_jsonl(
+                input_path=input_path,
+                out=out,
+                options=fix_options,
+                sidecar_store=sidecar_store,
+                sidecar_path=resolved_sidecar,
+                output_format=output_format,
+                dry_run=dry_run,
+                overwrite=overwrite,
+            )
+            return
+
+        records, _ = read_records(input_path)
+        result = fix_records(records, fix_options)
 
         render_fix_summary(console, result, dry_run=dry_run)
         if dry_run:
@@ -413,6 +438,150 @@ def _sidecar_store(store_option: SidecarStoreOption, path: Path) -> SidecarStore
     if store_option == SidecarStoreOption.sqlite:
         return SQLiteStore(path)
     raise ValueError("json sidecar backend does not use SidecarStore")
+
+
+def _fix_streaming_jsonl(
+    *,
+    input_path: Path,
+    out: Path,
+    options: FixOptions,
+    sidecar_store: SidecarStoreOption,
+    sidecar_path: Path,
+    output_format: RecordOutputFormat,
+    dry_run: bool,
+    overwrite: bool,
+) -> None:
+    if detect_input_format(input_path) != "jsonl":
+        raise InvalidInputError("--stream currently supports JSONL input only.")
+    if output_format != RecordOutputFormat.jsonl:
+        raise InvalidInputError("--stream requires --format jsonl for output.")
+
+    total_records = 0
+    changed_count = 0
+    stored_count = 0
+    deduplicated_count = 0
+    warnings: list[FixWarning] = []
+    savings: list[FixSavings] = []
+
+    if dry_run:
+        for _, sidecar, record_warnings, record_savings in fix_records_iter(
+            iter_jsonl_records(input_path), options
+        ):
+            total_records += 1
+            warnings.extend(record_warnings)
+            savings.append(record_savings)
+            if sidecar is not None:
+                changed_count += 1
+        _print_stream_fix_summary(
+            total_records=total_records,
+            changed_count=changed_count,
+            stored_count=0,
+            deduplicated_count=0,
+            warnings=warnings,
+            savings=savings,
+            dry_run=True,
+        )
+        return
+
+    ensure_output_writable(out, overwrite=overwrite)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    store = (
+        None
+        if sidecar_store == SidecarStoreOption.json
+        else _sidecar_store(sidecar_store, sidecar_path)
+    )
+
+    with out.open("w", encoding="utf-8") as output_file:
+        for cleaned_record, sidecar, record_warnings, record_savings in fix_records_iter(
+            iter_jsonl_records(input_path), options
+        ):
+            total_records += 1
+            warnings.extend(record_warnings)
+            savings.append(record_savings)
+            record_to_write = cleaned_record
+            if sidecar is not None:
+                changed_count += 1
+                if sidecar_store == SidecarStoreOption.json:
+                    write_sidecars([sidecar], overwrite=overwrite)
+                else:
+                    if store is None:
+                        raise RuntimeError("Sidecar store was not initialized.")
+                    stored = store.write(record_id=sidecar.record_id, payload=sidecar.payload)
+                    stored_count += 1
+                    if stored.deduplicated:
+                        deduplicated_count += 1
+                    record_to_write = _replace_content_ref(
+                        cleaned_record,
+                        old_ref=sidecar.ref,
+                        new_ref=stored.ref,
+                        content_ref_field=options.content_ref_field,
+                    )
+            output_file.write(
+                json.dumps(record_to_write, ensure_ascii=False, separators=(",", ":"))
+            )
+            output_file.write("\n")
+
+    _print_stream_fix_summary(
+        total_records=total_records,
+        changed_count=changed_count,
+        stored_count=stored_count,
+        deduplicated_count=deduplicated_count,
+        warnings=warnings,
+        savings=savings,
+        dry_run=False,
+    )
+    console.print(f"[green]Wrote cleaned records to {out}.[/green]")
+    if changed_count:
+        _print_sidecar_write_summary(sidecar_store, sidecar_path, changed_count)
+
+
+def _replace_content_ref(
+    record: Record,
+    *,
+    old_ref: str,
+    new_ref: str,
+    content_ref_field: str,
+) -> Record:
+    record_copy = dict(record)
+    metadata = dict(record_copy.get("metadata", {}))
+    if metadata.get(content_ref_field) == old_ref:
+        metadata[content_ref_field] = new_ref
+    record_copy["metadata"] = metadata
+    return record_copy
+
+
+def _print_stream_fix_summary(
+    *,
+    total_records: int,
+    changed_count: int,
+    stored_count: int,
+    deduplicated_count: int,
+    warnings: list[FixWarning],
+    savings: list[FixSavings],
+    dry_run: bool,
+) -> None:
+    action = "would update" if dry_run else "updated"
+    console.print(
+        f"[bold]Fix summary:[/bold] {action} {total_records} records; "
+        f"{changed_count} records have sidecar payloads."
+    )
+    before_bytes = sum(saving.before_bytes for saving in savings)
+    reduced_bytes = sum(saving.reduced_bytes for saving in savings)
+    reduction_ratio = 0.0 if before_bytes == 0 else reduced_bytes / before_bytes
+    console.print(
+        "[bold]Metadata reduction:[/bold] "
+        f"{reduced_bytes} B ({reduced_bytes / 1024:.2f} KB) removed; "
+        f"{reduction_ratio:.1%} smaller metadata."
+    )
+    if stored_count:
+        console.print(
+            f"[bold]Stored sidecars:[/bold] {stored_count}; "
+            f"deduplicated refs: {deduplicated_count}."
+        )
+    for warning in warnings[:10]:
+        console.print(f"[yellow]Warning:[/yellow] {warning.record_id}: {warning.message}")
+    if len(warnings) > 10:
+        console.print(f"[yellow]Warning:[/yellow] {len(warnings) - 10} more warnings omitted.")
 
 
 def _print_sidecar_write_summary(

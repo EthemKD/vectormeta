@@ -242,17 +242,62 @@ class FixWarning:
 
 
 @dataclass(frozen=True)
+class FixSavings:
+    """Metadata byte reduction for one fixed record."""
+
+    record_id: str
+    before_bytes: int
+    after_bytes: int
+    moved_field_count: int
+
+    @property
+    def reduced_bytes(self) -> int:
+        """Return how many metadata bytes were removed."""
+        return max(0, self.before_bytes - self.after_bytes)
+
+    @property
+    def reduction_ratio(self) -> float:
+        """Return reduction ratio from 0.0 to 1.0."""
+        if self.before_bytes == 0:
+            return 0.0
+        return self.reduced_bytes / self.before_bytes
+
+
+@dataclass(frozen=True)
 class FixResult:
     """Cleaned records plus sidecar payloads."""
 
     cleaned_records: list[Record]
     sidecars: list[SidecarPayload]
     warnings: list[FixWarning] = field(default_factory=list)
+    savings: list[FixSavings] = field(default_factory=list)
 
     @property
     def changed_count(self) -> int:
         """Return how many records produced sidecar payloads."""
         return len(self.sidecars)
+
+    @property
+    def before_bytes(self) -> int:
+        """Return total metadata bytes before fixing."""
+        return sum(saving.before_bytes for saving in self.savings)
+
+    @property
+    def after_bytes(self) -> int:
+        """Return total metadata bytes after fixing."""
+        return sum(saving.after_bytes for saving in self.savings)
+
+    @property
+    def reduced_bytes(self) -> int:
+        """Return total metadata bytes removed."""
+        return sum(saving.reduced_bytes for saving in self.savings)
+
+    @property
+    def reduction_ratio(self) -> float:
+        """Return aggregate metadata reduction ratio."""
+        if self.before_bytes == 0:
+            return 0.0
+        return self.reduced_bytes / self.before_bytes
 
 
 @dataclass(frozen=True)

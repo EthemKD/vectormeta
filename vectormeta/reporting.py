@@ -156,6 +156,12 @@ def render_fix_summary(console: Console, result: FixResult, *, dry_run: bool) ->
         f"[bold]Fix summary:[/bold] {action} {len(result.cleaned_records)} records; "
         f"{result.changed_count} records have sidecar payloads."
     )
+    if result.savings:
+        console.print(
+            "[bold]Metadata reduction:[/bold] "
+            f"{result.reduced_bytes} B ({bytes_to_kb(result.reduced_bytes):.2f} KB) removed; "
+            f"{result.reduction_ratio:.1%} smaller metadata."
+        )
     if result.warnings:
         warning_table = Table(title="Warnings")
         warning_table.add_column("Record ID", overflow="fold")

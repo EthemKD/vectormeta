@@ -32,8 +32,8 @@
 `vectormeta` is a Python CLI package for detecting, validating, and fixing problematic
 metadata in vector database records. It scans JSON or JSONL vector records, reports the
 largest metadata fields, validates common upsert-failure cases, and can move heavy
-content fields into local JSON sidecar files while leaving clean filterable metadata in
-the vector database payload.
+content fields into JSON, file, or SQLite sidecars while leaving clean filterable
+metadata in the vector database payload.
 
 The project is designed for developers preparing records for Pinecone, Chroma, Qdrant,
 Weaviate, or a custom metadata policy. Pinecone is the clearest strict-limit target in
@@ -78,7 +78,7 @@ sidecar JSON file      -> large text, HTML, tables, summaries, payloads
 - Validate records for common upsert failures before upload.
 - Check Pinecone metadata value shapes, duplicate IDs, missing IDs, vector shape, and
   vector dimensions.
-- Move heavy metadata fields into sidecar JSON files.
+- Move heavy metadata fields into sidecar JSON files, content-addressed files, or SQLite.
 - Preserve unknown record fields and original record order.
 - Sanitize sidecar filenames derived from record IDs.
 - Protect output files and sidecars from accidental overwrite.
@@ -305,6 +305,20 @@ vectormeta fix chunks.json \
   --out ready.json
 ```
 
+Stream large JSONL inputs one record at a time:
+
+```bash
+vectormeta fix chunks.jsonl \
+  --target pinecone \
+  --stream \
+  --format jsonl \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
+  --out ready.jsonl
+```
+
+`fix` reports total metadata bytes removed and the aggregate metadata reduction percentage.
+
 If your input metadata already contains `content_ref`, choose another reference field:
 
 ```bash
@@ -516,8 +530,8 @@ Expected result:
   `--sidecar-store sqlite`.
 - Store-backed sidecars deduplicate identical moved payloads, but distributed/cloud
   stores such as S3 are not included yet.
-- Input support is JSON arrays and JSONL records, but files are currently read into
-  memory. Streaming JSONL scan/fix is planned for larger embedding datasets.
+- Input support is JSON arrays and JSONL records. `fix --stream --format jsonl` processes
+  JSONL inputs one record at a time; `scan` and `validate` still read full files into memory.
 - Vector validation covers dense numeric vector lists and dimensions. It does not infer
   index configuration unless you provide `--dim`.
 - Provider-specific metadata schema validation is currently strictest for Pinecone.
@@ -528,12 +542,11 @@ Expected result:
 
 Planned ideas include:
 
-- Streaming JSONL scan/fix
+- Streaming JSONL scan/validate
 - More provider-specific validation rules
 - S3 sidecar backend
 - LangChain `Document` adapter
 - LlamaIndex `Node` adapter
-- Pinecone upsert wrapper
 - GitHub Action for metadata checks
 - HTML report output
 
