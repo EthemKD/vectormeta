@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 
 from vectormeta import __version__
-from vectormeta.analyzer import analyze_records
+from vectormeta.analyzer import analyze_records, analyze_records_stream
 from vectormeta.config import load_config
 from vectormeta.errors import InvalidInputError, VectorMetaError
 from vectormeta.fixer import DEFAULT_KEEP_FIELDS, fix_records, fix_records_iter, parse_field_list
@@ -42,7 +42,7 @@ from vectormeta.stores import (
     replace_content_refs,
     write_sidecar_payloads,
 )
-from vectormeta.validator import validate_records
+from vectormeta.validator import validate_records, validate_records_stream
 
 app = typer.Typer(help="Detect and fix oversized vector database metadata.")
 console = Console()
@@ -128,6 +128,10 @@ def scan(
         ScanFormat,
         typer.Option("--format", help="Output format: table or json."),
     ] = ScanFormat.table,
+    stream: Annotated[
+        bool,
+        typer.Option("--stream", help="Stream JSONL input and keep only top records in memory."),
+    ] = False,
     no_fail: Annotated[
         bool,
         typer.Option("--no-fail", help="Exit 0 even when oversized records are found."),
@@ -137,8 +141,14 @@ def scan(
     try:
         normalized_target = normalize_target(target)
         limit_bytes = resolve_limit_bytes(normalized_target, limit_kb)
-        records, _ = read_records(input_path)
-        report = analyze_records(records, normalized_target, limit_bytes)
+        if stream:
+            _ensure_streaming_jsonl(input_path)
+            report = analyze_records_stream(
+                iter_jsonl_records(input_path), normalized_target, limit_bytes, top=top
+            )
+        else:
+            records, _ = read_records(input_path)
+            report = analyze_records(records, normalized_target, limit_bytes)
         if output_format == ScanFormat.json:
             console.print_json(
                 json.dumps(scan_report_to_dict(report, top=top), ensure_ascii=False, sort_keys=True)
@@ -169,6 +179,12 @@ def validate(
         ScanFormat,
         typer.Option("--format", help="Output format: table or json."),
     ] = ScanFormat.table,
+    stream: Annotated[
+        bool,
+        typer.Option(
+            "--stream", help="Stream JSONL input and keep only problem records in memory."
+        ),
+    ] = False,
     no_fail: Annotated[
         bool,
         typer.Option("--no-fail", help="Exit 0 even when validation errors are found."),
@@ -178,8 +194,18 @@ def validate(
     try:
         normalized_target = normalize_target(target)
         limit_bytes = resolve_limit_bytes(normalized_target, limit_kb)
-        records, _ = read_records(input_path)
-        report = validate_records(records, normalized_target, limit_bytes, dim=dim)
+        if stream:
+            _ensure_streaming_jsonl(input_path)
+            report = validate_records_stream(
+                iter_jsonl_records(input_path),
+                normalized_target,
+                limit_bytes,
+                dim=dim,
+                top=top,
+            )
+        else:
+            records, _ = read_records(input_path)
+            report = validate_records(records, normalized_target, limit_bytes, dim=dim)
         if output_format == ScanFormat.json:
             console.print_json(
                 json.dumps(
@@ -440,6 +466,11 @@ def _sidecar_store(store_option: SidecarStoreOption, path: Path) -> SidecarStore
     raise ValueError("json sidecar backend does not use SidecarStore")
 
 
+def _ensure_streaming_jsonl(input_path: Path) -> None:
+    if detect_input_format(input_path) != "jsonl":
+        raise InvalidInputError("--stream currently supports JSONL input only.")
+
+
 def _fix_streaming_jsonl(
     *,
     input_path: Path,
@@ -451,8 +482,7 @@ def _fix_streaming_jsonl(
     dry_run: bool,
     overwrite: bool,
 ) -> None:
-    if detect_input_format(input_path) != "jsonl":
-        raise InvalidInputError("--stream currently supports JSONL input only.")
+    _ensure_streaming_jsonl(input_path)
     if output_format != RecordOutputFormat.jsonl:
         raise InvalidInputError("--stream requires --format jsonl for output.")
 

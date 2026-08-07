@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vectormeta.validator import validate_records
+from vectormeta.validator import validate_records, validate_records_stream
 
 
 def test_validate_records_reports_pinecone_metadata_type_errors() -> None:
@@ -97,3 +97,34 @@ def test_validate_records_marks_oversized_metadata() -> None:
     assert report.has_errors
     assert report.errors[0].code == "metadata_too_large"
     assert report.records[0].over_limit_by_bytes > 0
+
+
+def test_validate_records_stream_counts_all_errors_and_keeps_problem_records() -> None:
+    records = [
+        {"id": "doc", "values": [0.1], "metadata": {"nested": {"bad": True}}},
+        {"id": "doc", "values": [0.2], "metadata": {"source": "paper.pdf"}},
+        {"id": "ok", "values": [0.3], "metadata": {"source": "paper.pdf"}},
+    ]
+
+    report = validate_records_stream(records, "pinecone", 4096, top=1)
+
+    assert report.total_records == 3
+    assert report.error_count == 2
+    assert report.warning_count == 0
+    assert len(report.records) == 1
+    assert report.records[0].record_id == "doc"
+    assert report.records[0].issues[0].code == "invalid_metadata_value"
+
+
+def test_validate_records_stream_has_errors_uses_aggregate_count() -> None:
+    records = [
+        {"id": "warn", "metadata": {"source": "paper.pdf"}},
+        {"id": "bad", "values": [0.1], "metadata": {"nested": {}}},
+    ]
+
+    report = validate_records_stream(records, "pinecone", 4096, top=1)
+
+    assert report.warning_count == 1
+    assert report.error_count == 1
+    assert report.records[0].record_id == "warn"
+    assert report.has_errors

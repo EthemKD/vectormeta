@@ -61,15 +61,21 @@ class ScanReport:
     target: str
     limit_bytes: int
     records: list[RecordAnalysis]
+    total_records_count: int | None = None
+    oversized_records_count: int | None = None
 
     @property
     def total_records(self) -> int:
         """Return the total number of records scanned."""
+        if self.total_records_count is not None:
+            return self.total_records_count
         return len(self.records)
 
     @property
     def oversized_count(self) -> int:
         """Return the number of records exceeding the limit."""
+        if self.oversized_records_count is not None:
+            return self.oversized_records_count
         return sum(record.is_oversized for record in self.records)
 
     @property
@@ -142,10 +148,15 @@ class ValidationReport:
     limit_bytes: int
     expected_dim: int | None
     records: list[RecordValidation]
+    total_records_count: int | None = None
+    error_count_total: int | None = None
+    warning_count_total: int | None = None
 
     @property
     def total_records(self) -> int:
         """Return the total number of records validated."""
+        if self.total_records_count is not None:
+            return self.total_records_count
         return len(self.records)
 
     @property
@@ -166,17 +177,21 @@ class ValidationReport:
     @property
     def error_count(self) -> int:
         """Return the total number of error-level issues."""
+        if self.error_count_total is not None:
+            return self.error_count_total
         return len(self.errors)
 
     @property
     def warning_count(self) -> int:
         """Return the total number of warning-level issues."""
+        if self.warning_count_total is not None:
+            return self.warning_count_total
         return len(self.warnings)
 
     @property
     def has_errors(self) -> bool:
         """Return whether any record has error-level validation issues."""
-        return bool(self.errors)
+        return self.error_count > 0
 
     @property
     def records_with_errors(self) -> list[RecordValidation]:

@@ -14,6 +14,12 @@ Use JSON output in CI:
 vectormeta scan chunks.json --target pinecone --format json
 ```
 
+Stream JSONL input while keeping only the top oversized records in memory:
+
+```bash
+vectormeta scan chunks.jsonl --target pinecone --stream --format json --no-fail
+```
+
 Use a custom limit:
 
 ```bash
@@ -38,6 +44,12 @@ Use JSON output in CI:
 
 ```bash
 vectormeta validate chunks.json --target pinecone --dim 1536 --format json
+```
+
+Stream JSONL input while keeping only problem records in memory:
+
+```bash
+vectormeta validate chunks.jsonl --target pinecone --dim 1536 --stream --format json --no-fail
 ```
 
 Exit codes:
@@ -89,9 +101,11 @@ vectormeta fix chunks.json \
   --out ready.json
 ```
 
-Stream JSONL records without loading the full file into memory:
+Stream JSONL records through the full check-and-fix flow:
 
 ```bash
+vectormeta scan chunks.jsonl --target pinecone --stream --no-fail
+vectormeta validate chunks.jsonl --target pinecone --stream --no-fail
 vectormeta fix chunks.jsonl \
   --target pinecone \
   --stream \
@@ -101,7 +115,7 @@ vectormeta fix chunks.jsonl \
   --out ready.jsonl
 ```
 
-The streaming mode is currently scoped to JSONL input and JSONL output.
+`scan --stream` and `validate --stream` require JSONL input. `fix --stream` also requires `--format jsonl` output.
 
 ## Hydrate
 

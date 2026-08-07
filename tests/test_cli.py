@@ -367,3 +367,93 @@ def test_fix_streaming_requires_jsonl_output(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert "--stream requires --format jsonl" in result.output
+
+
+def test_scan_streaming_jsonl_reports_aggregate_counts(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "small", "metadata": {"source": "paper.pdf"}}),
+                json.dumps({"id": "large", "metadata": {"text": "x" * 200}}),
+                json.dumps({"id": "larger", "metadata": {"text": "y" * 300}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(input_path),
+            "--target",
+            "custom",
+            "--limit-kb",
+            "0.05",
+            "--stream",
+            "--top",
+            "1",
+            "--format",
+            "json",
+            "--no-fail",
+        ],
+    )
+
+    payload = json.loads(result.output)
+    assert result.exit_code == 0
+    assert payload["total_records"] == 3
+    assert payload["oversized_count"] == 2
+    assert [record["id"] for record in payload["oversized_records"]] == ["larger"]
+
+
+def test_validate_streaming_jsonl_reports_aggregate_counts(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "doc", "values": [0.1], "metadata": {"nested": {}}}),
+                json.dumps({"id": "doc", "values": [0.2], "metadata": {"source": "paper.pdf"}}),
+                json.dumps({"id": "ok", "values": [0.3], "metadata": {"source": "paper.pdf"}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            str(input_path),
+            "--target",
+            "pinecone",
+            "--stream",
+            "--top",
+            "1",
+            "--format",
+            "json",
+            "--no-fail",
+        ],
+    )
+
+    payload = json.loads(result.output)
+    assert result.exit_code == 0
+    assert payload["total_records"] == 3
+    assert payload["error_count"] == 2
+    assert len(payload["records"]) == 1
+    assert payload["top_issues"][0]["code"] == "invalid_metadata_value"
+
+
+def test_scan_streaming_requires_jsonl_input(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.json"
+    input_path.write_text('[{"id":"doc","metadata":{}}]', encoding="utf-8")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["scan", str(input_path), "--stream"])
+
+    assert result.exit_code == 2
+    assert "--stream currently supports JSONL input only" in result.output

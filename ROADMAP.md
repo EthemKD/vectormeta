@@ -2,7 +2,6 @@
 
 Planned ideas after v0.3.0:
 
-- Streaming JSONL scan and validate for very large embedding datasets.
 - S3 sidecar backend.
 - LangChain `Document` adapter.
 - LlamaIndex `Node` adapter.

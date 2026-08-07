@@ -71,7 +71,7 @@ sidecar JSON file      -> large text, HTML, tables, summaries, payloads
 
 ## Features
 
-- Scan JSON arrays and newline-delimited JSON records.
+- Scan JSON arrays and newline-delimited JSON records, with streaming JSONL support.
 - Measure metadata using compact UTF-8 JSON bytes.
 - Report oversized records, largest fields, byte counts, KB counts, and suggested moves.
 - Exit with code `1` when oversized records are found, which makes scans useful in CI.
@@ -223,6 +223,7 @@ Useful options:
 - `--limit-kb <number>` for custom or overridden limits
 - `--top <number>` for the largest oversized records to show
 - `--format table|json`
+- `--stream` to process JSONL input while keeping only top oversized records in memory
 - `--no-fail` to exit `0` even when oversized records are found
 
 Exit codes:
@@ -251,6 +252,7 @@ Useful options:
 - `--dim <number>` for the expected vector dimension
 - `--top <number>` for validation issues to show
 - `--format table|json`
+- `--stream` to process JSONL input while keeping only problem records in memory
 - `--no-fail` to exit `0` even when error-level issues are found
 
 Exit codes:
@@ -305,9 +307,11 @@ vectormeta fix chunks.json \
   --out ready.json
 ```
 
-Stream large JSONL inputs one record at a time:
+Stream large JSONL inputs through scan, validate, and fix:
 
 ```bash
+vectormeta scan chunks.jsonl --target pinecone --stream --no-fail
+vectormeta validate chunks.jsonl --target pinecone --stream --no-fail
 vectormeta fix chunks.jsonl \
   --target pinecone \
   --stream \
@@ -530,8 +534,8 @@ Expected result:
   `--sidecar-store sqlite`.
 - Store-backed sidecars deduplicate identical moved payloads, but distributed/cloud
   stores such as S3 are not included yet.
-- Input support is JSON arrays and JSONL records. `fix --stream --format jsonl` processes
-  JSONL inputs one record at a time; `scan` and `validate` still read full files into memory.
+- Input support is JSON arrays and JSONL records. `scan --stream`, `validate --stream`,
+  and `fix --stream --format jsonl` process JSONL inputs one record at a time.
 - Vector validation covers dense numeric vector lists and dimensions. It does not infer
   index configuration unless you provide `--dim`.
 - Provider-specific metadata schema validation is currently strictest for Pinecone.
@@ -542,7 +546,6 @@ Expected result:
 
 Planned ideas include:
 
-- Streaming JSONL scan/validate
 - More provider-specific validation rules
 - S3 sidecar backend
 - LangChain `Document` adapter
