@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added metadata reduction totals to `fix` output so users can see bytes removed and
+  percentage reduction after cleanup.
+- Added JSONL streaming modes for `scan`, `validate`, and `fix` so large JSONL inputs
+  can be processed without keeping every record in memory.
+
 ## 0.3.0 - 2026-06-28
 
 ### Added

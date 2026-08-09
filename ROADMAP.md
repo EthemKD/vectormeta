@@ -1,14 +1,12 @@
 # Roadmap
 
-Planned ideas after the MVP:
+Planned ideas after v0.3.0:
 
-- SQLite sidecar backend.
-- Streaming JSONL scan/fix for very large embedding datasets.
-- Content-addressed sidecar deduplication for repeated document payloads.
 - S3 sidecar backend.
 - LangChain `Document` adapter.
 - LlamaIndex `Node` adapter.
-- Pinecone upsert wrapper.
 - GitHub Action for metadata checks.
+- Pre-commit hook for local metadata checks.
 - HTML report output.
 - More target-specific policy presets with official-doc references.
+- Public API stability and deprecation policy for 1.0.

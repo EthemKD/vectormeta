@@ -61,15 +61,21 @@ class ScanReport:
     target: str
     limit_bytes: int
     records: list[RecordAnalysis]
+    total_records_count: int | None = None
+    oversized_records_count: int | None = None
 
     @property
     def total_records(self) -> int:
         """Return the total number of records scanned."""
+        if self.total_records_count is not None:
+            return self.total_records_count
         return len(self.records)
 
     @property
     def oversized_count(self) -> int:
         """Return the number of records exceeding the limit."""
+        if self.oversized_records_count is not None:
+            return self.oversized_records_count
         return sum(record.is_oversized for record in self.records)
 
     @property
@@ -142,10 +148,15 @@ class ValidationReport:
     limit_bytes: int
     expected_dim: int | None
     records: list[RecordValidation]
+    total_records_count: int | None = None
+    error_count_total: int | None = None
+    warning_count_total: int | None = None
 
     @property
     def total_records(self) -> int:
         """Return the total number of records validated."""
+        if self.total_records_count is not None:
+            return self.total_records_count
         return len(self.records)
 
     @property
@@ -166,17 +177,21 @@ class ValidationReport:
     @property
     def error_count(self) -> int:
         """Return the total number of error-level issues."""
+        if self.error_count_total is not None:
+            return self.error_count_total
         return len(self.errors)
 
     @property
     def warning_count(self) -> int:
         """Return the total number of warning-level issues."""
+        if self.warning_count_total is not None:
+            return self.warning_count_total
         return len(self.warnings)
 
     @property
     def has_errors(self) -> bool:
         """Return whether any record has error-level validation issues."""
-        return bool(self.errors)
+        return self.error_count > 0
 
     @property
     def records_with_errors(self) -> list[RecordValidation]:
@@ -242,17 +257,62 @@ class FixWarning:
 
 
 @dataclass(frozen=True)
+class FixSavings:
+    """Metadata byte reduction for one fixed record."""
+
+    record_id: str
+    before_bytes: int
+    after_bytes: int
+    moved_field_count: int
+
+    @property
+    def reduced_bytes(self) -> int:
+        """Return how many metadata bytes were removed."""
+        return max(0, self.before_bytes - self.after_bytes)
+
+    @property
+    def reduction_ratio(self) -> float:
+        """Return reduction ratio from 0.0 to 1.0."""
+        if self.before_bytes == 0:
+            return 0.0
+        return self.reduced_bytes / self.before_bytes
+
+
+@dataclass(frozen=True)
 class FixResult:
     """Cleaned records plus sidecar payloads."""
 
     cleaned_records: list[Record]
     sidecars: list[SidecarPayload]
     warnings: list[FixWarning] = field(default_factory=list)
+    savings: list[FixSavings] = field(default_factory=list)
 
     @property
     def changed_count(self) -> int:
         """Return how many records produced sidecar payloads."""
         return len(self.sidecars)
+
+    @property
+    def before_bytes(self) -> int:
+        """Return total metadata bytes before fixing."""
+        return sum(saving.before_bytes for saving in self.savings)
+
+    @property
+    def after_bytes(self) -> int:
+        """Return total metadata bytes after fixing."""
+        return sum(saving.after_bytes for saving in self.savings)
+
+    @property
+    def reduced_bytes(self) -> int:
+        """Return total metadata bytes removed."""
+        return sum(saving.reduced_bytes for saving in self.savings)
+
+    @property
+    def reduction_ratio(self) -> float:
+        """Return aggregate metadata reduction ratio."""
+        if self.before_bytes == 0:
+            return 0.0
+        return self.reduced_bytes / self.before_bytes
 
 
 @dataclass(frozen=True)

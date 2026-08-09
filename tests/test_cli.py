@@ -290,3 +290,170 @@ def test_fix_with_file_store_deduplicates_repeated_payloads(tmp_path: Path) -> N
     assert refs[0] == refs[1]
     assert refs[0].startswith("file:")
     assert len(list(sidecar_path.glob("*.json"))) == 1
+
+
+def test_fix_streaming_jsonl_with_sqlite_store_deduplicates_payloads(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    ready_path = tmp_path / "ready.jsonl"
+    sqlite_path = tmp_path / "sidecars.sqlite"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": "doc-1",
+                        "values": [0.1],
+                        "metadata": {"source": "paper.pdf", "raw_html": "<p>same</p>"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": "doc-2",
+                        "values": [0.2],
+                        "metadata": {"source": "paper.pdf", "raw_html": "<p>same</p>"},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "fix",
+            str(input_path),
+            "--target",
+            "pinecone",
+            "--stream",
+            "--format",
+            "jsonl",
+            "--sidecar-store",
+            "sqlite",
+            "--sidecar",
+            str(sqlite_path),
+            "--out",
+            str(ready_path),
+        ],
+    )
+
+    lines = [json.loads(line) for line in ready_path.read_text(encoding="utf-8").splitlines()]
+    refs = [record["metadata"]["content_ref"] for record in lines]
+    assert result.exit_code == 0
+    assert "Metadata reduction" in result.output
+    assert "deduplicated refs: 1" in result.output
+    assert refs[0] == refs[1]
+    assert refs[0].startswith("sqlite:")
+
+
+def test_fix_streaming_requires_jsonl_output(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    ready_path = tmp_path / "ready.json"
+    input_path.write_text('{"id":"doc","metadata":{"chunk_text":"payload"}}\n', encoding="utf-8")
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "fix",
+            str(input_path),
+            "--stream",
+            "--out",
+            str(ready_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--stream requires --format jsonl" in result.output
+
+
+def test_scan_streaming_jsonl_reports_aggregate_counts(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "small", "metadata": {"source": "paper.pdf"}}),
+                json.dumps({"id": "large", "metadata": {"text": "x" * 200}}),
+                json.dumps({"id": "larger", "metadata": {"text": "y" * 300}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(input_path),
+            "--target",
+            "custom",
+            "--limit-kb",
+            "0.05",
+            "--stream",
+            "--top",
+            "1",
+            "--format",
+            "json",
+            "--no-fail",
+        ],
+    )
+
+    payload = json.loads(result.output)
+    assert result.exit_code == 0
+    assert payload["total_records"] == 3
+    assert payload["oversized_count"] == 2
+    assert [record["id"] for record in payload["oversized_records"]] == ["larger"]
+
+
+def test_validate_streaming_jsonl_reports_aggregate_counts(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.jsonl"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "doc", "values": [0.1], "metadata": {"nested": {}}}),
+                json.dumps({"id": "doc", "values": [0.2], "metadata": {"source": "paper.pdf"}}),
+                json.dumps({"id": "ok", "values": [0.3], "metadata": {"source": "paper.pdf"}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            str(input_path),
+            "--target",
+            "pinecone",
+            "--stream",
+            "--top",
+            "1",
+            "--format",
+            "json",
+            "--no-fail",
+        ],
+    )
+
+    payload = json.loads(result.output)
+    assert result.exit_code == 0
+    assert payload["total_records"] == 3
+    assert payload["error_count"] == 2
+    assert len(payload["records"]) == 1
+    assert payload["top_issues"][0]["code"] == "invalid_metadata_value"
+
+
+def test_scan_streaming_requires_jsonl_input(tmp_path: Path) -> None:
+    input_path = tmp_path / "records.json"
+    input_path.write_text('[{"id":"doc","metadata":{}}]', encoding="utf-8")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["scan", str(input_path), "--stream"])
+
+    assert result.exit_code == 2
+    assert "--stream currently supports JSONL input only" in result.output

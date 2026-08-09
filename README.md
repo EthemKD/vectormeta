@@ -32,8 +32,8 @@
 `vectormeta` is a Python CLI package for detecting, validating, and fixing problematic
 metadata in vector database records. It scans JSON or JSONL vector records, reports the
 largest metadata fields, validates common upsert-failure cases, and can move heavy
-content fields into local JSON sidecar files while leaving clean filterable metadata in
-the vector database payload.
+content fields into JSON, file, or SQLite sidecars while leaving clean filterable
+metadata in the vector database payload.
 
 The project is designed for developers preparing records for Pinecone, Chroma, Qdrant,
 Weaviate, or a custom metadata policy. Pinecone is the clearest strict-limit target in
@@ -71,14 +71,14 @@ sidecar JSON file      -> large text, HTML, tables, summaries, payloads
 
 ## Features
 
-- Scan JSON arrays and newline-delimited JSON records.
+- Scan JSON arrays and newline-delimited JSON records, with streaming JSONL support.
 - Measure metadata using compact UTF-8 JSON bytes.
 - Report oversized records, largest fields, byte counts, KB counts, and suggested moves.
 - Exit with code `1` when oversized records are found, which makes scans useful in CI.
 - Validate records for common upsert failures before upload.
 - Check Pinecone metadata value shapes, duplicate IDs, missing IDs, vector shape, and
   vector dimensions.
-- Move heavy metadata fields into sidecar JSON files.
+- Move heavy metadata fields into sidecar JSON files, content-addressed files, or SQLite.
 - Preserve unknown record fields and original record order.
 - Sanitize sidecar filenames derived from record IDs.
 - Protect output files and sidecars from accidental overwrite.
@@ -223,6 +223,7 @@ Useful options:
 - `--limit-kb <number>` for custom or overridden limits
 - `--top <number>` for the largest oversized records to show
 - `--format table|json`
+- `--stream` to process JSONL input while keeping only top oversized records in memory
 - `--no-fail` to exit `0` even when oversized records are found
 
 Exit codes:
@@ -251,6 +252,7 @@ Useful options:
 - `--dim <number>` for the expected vector dimension
 - `--top <number>` for validation issues to show
 - `--format table|json`
+- `--stream` to process JSONL input while keeping only problem records in memory
 - `--no-fail` to exit `0` even when error-level issues are found
 
 Exit codes:
@@ -304,6 +306,22 @@ vectormeta fix chunks.json \
   --sidecar vectormeta-sidecars.sqlite \
   --out ready.json
 ```
+
+Stream large JSONL inputs through scan, validate, and fix:
+
+```bash
+vectormeta scan chunks.jsonl --target pinecone --stream --no-fail
+vectormeta validate chunks.jsonl --target pinecone --stream --no-fail
+vectormeta fix chunks.jsonl \
+  --target pinecone \
+  --stream \
+  --format jsonl \
+  --sidecar-store sqlite \
+  --sidecar vectormeta-sidecars.sqlite \
+  --out ready.jsonl
+```
+
+`fix` reports total metadata bytes removed and the aggregate metadata reduction percentage.
 
 If your input metadata already contains `content_ref`, choose another reference field:
 
@@ -516,8 +534,8 @@ Expected result:
   `--sidecar-store sqlite`.
 - Store-backed sidecars deduplicate identical moved payloads, but distributed/cloud
   stores such as S3 are not included yet.
-- Input support is JSON arrays and JSONL records, but files are currently read into
-  memory. Streaming JSONL scan/fix is planned for larger embedding datasets.
+- Input support is JSON arrays and JSONL records. `scan --stream`, `validate --stream`,
+  and `fix --stream --format jsonl` process JSONL inputs one record at a time.
 - Vector validation covers dense numeric vector lists and dimensions. It does not infer
   index configuration unless you provide `--dim`.
 - Provider-specific metadata schema validation is currently strictest for Pinecone.
@@ -528,12 +546,10 @@ Expected result:
 
 Planned ideas include:
 
-- Streaming JSONL scan/fix
 - More provider-specific validation rules
 - S3 sidecar backend
 - LangChain `Document` adapter
 - LlamaIndex `Node` adapter
-- Pinecone upsert wrapper
 - GitHub Action for metadata checks
 - HTML report output
 

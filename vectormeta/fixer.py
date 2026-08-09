@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 from vectormeta.analyzer import get_metadata, get_record_id
 from vectormeta.errors import SidecarConflictError
-from vectormeta.models import FixOptions, FixResult, FixWarning, Record, SidecarPayload
+from vectormeta.models import FixOptions, FixResult, FixSavings, FixWarning, Record, SidecarPayload
 from vectormeta.sizing import field_sizes, metadata_size_bytes
 
 DEFAULT_MOVE_FIELDS: tuple[str, ...] = (
@@ -59,16 +59,33 @@ def fix_records(records: Iterable[Mapping[str, Any]], options: FixOptions) -> Fi
     cleaned_records: list[Record] = []
     sidecars: list[SidecarPayload] = []
     warnings: list[FixWarning] = []
-    used_names: set[str] = set()
+    savings: list[FixSavings] = []
 
-    for record in records:
-        cleaned_record, sidecar, record_warnings = _fix_record(record, options, used_names)
+    for cleaned_record, sidecar, record_warnings, record_savings in fix_records_iter(
+        records, options
+    ):
         cleaned_records.append(cleaned_record)
         warnings.extend(record_warnings)
+        savings.append(record_savings)
         if sidecar is not None:
             sidecars.append(sidecar)
 
-    return FixResult(cleaned_records=cleaned_records, sidecars=sidecars, warnings=warnings)
+    return FixResult(
+        cleaned_records=cleaned_records,
+        sidecars=sidecars,
+        warnings=warnings,
+        savings=savings,
+    )
+
+
+def fix_records_iter(
+    records: Iterable[Mapping[str, Any]],
+    options: FixOptions,
+) -> Iterator[tuple[Record, SidecarPayload | None, list[FixWarning], FixSavings]]:
+    """Yield fixed records one at a time while preserving sidecar filename uniqueness."""
+    used_names: set[str] = set()
+    for record in records:
+        yield _fix_record(record, options, used_names)
 
 
 def sanitize_sidecar_filename(record_id: str) -> str:
@@ -91,9 +108,10 @@ def _fix_record(
     record: Mapping[str, Any],
     options: FixOptions,
     used_names: set[str],
-) -> tuple[Record, SidecarPayload | None, list[FixWarning]]:
+) -> tuple[Record, SidecarPayload | None, list[FixWarning], FixSavings]:
     record_id = get_record_id(record)
     metadata = dict(get_metadata(record))
+    before_bytes = metadata_size_bytes(metadata)
     cleaned_record = dict(record)
     payload_fields: dict[str, Any] = {}
     warnings: list[FixWarning] = []
@@ -171,14 +189,21 @@ def _fix_record(
         )
 
     cleaned_record["metadata"] = metadata
+    savings = FixSavings(
+        record_id=record_id,
+        before_bytes=before_bytes,
+        after_bytes=metadata_size_bytes(metadata),
+        moved_field_count=len(payload_fields),
+    )
     if not payload_fields:
-        return cleaned_record, None, warnings
+        return cleaned_record, None, warnings, savings
 
     payload = {"id": record_id, **payload_fields}
     return (
         cleaned_record,
         SidecarPayload(record_id=record_id, path=sidecar_path, ref=sidecar_ref, payload=payload),
         warnings,
+        savings,
     )
 
 

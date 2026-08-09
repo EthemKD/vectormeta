@@ -147,6 +147,145 @@ def validate_records(
     )
 
 
+def validate_records_stream(
+    records: Iterable[Mapping[str, Any]],
+    target: str,
+    limit_bytes: int,
+    *,
+    dim: int | None = None,
+    top: int,
+) -> ValidationReport:
+    """Validate records while keeping only problem records in memory."""
+    normalized_target = target.strip().lower()
+    seen_ids: dict[str, int] = {}
+    expected_dataset_dim: int | None = None
+    total_records = 0
+    error_count = 0
+    warning_count = 0
+    problem_records: list[RecordValidation] = []
+
+    for index, record in enumerate(records):
+        total_records += 1
+        record_id, usable_id, id_field = _record_id(record, index=index)
+        issues: list[ValidationIssue] = []
+
+        if usable_id is None:
+            issues.append(
+                _issue(
+                    record_id,
+                    "error",
+                    "missing_id",
+                    "Record must contain a non-empty 'id' or '_id'.",
+                    id_field,
+                )
+            )
+        elif usable_id in seen_ids:
+            issues.append(
+                _issue(
+                    record_id,
+                    "error",
+                    "duplicate_id",
+                    f"Record id '{usable_id}' duplicates record index {seen_ids[usable_id]}.",
+                    id_field,
+                )
+            )
+        else:
+            seen_ids[usable_id] = index
+
+        metadata_size = 0
+        metadata = record.get("metadata")
+        if not isinstance(metadata, Mapping):
+            issues.append(
+                _issue(
+                    record_id,
+                    "error",
+                    "invalid_metadata",
+                    "Record metadata must be a JSON object.",
+                    "metadata",
+                )
+            )
+        else:
+            try:
+                metadata_size = metadata_size_bytes(metadata)
+            except InvalidInputError as exc:
+                issues.append(
+                    _issue(
+                        record_id,
+                        "error",
+                        "metadata_not_serializable",
+                        str(exc),
+                        "metadata",
+                    )
+                )
+            else:
+                if metadata_size > limit_bytes:
+                    over_by = metadata_size - limit_bytes
+                    issues.append(
+                        _issue(
+                            record_id,
+                            "error",
+                            "metadata_too_large",
+                            f"Metadata is {over_by} bytes over the configured limit.",
+                            "metadata",
+                        )
+                    )
+
+            if normalized_target == "pinecone":
+                issues.extend(_validate_pinecone_metadata(metadata, record_id))
+
+        vector_issue, vector_dim = _vector_dimension(record, record_id)
+        if vector_issue is not None:
+            issues.append(vector_issue)
+        elif vector_dim is not None:
+            if dim is not None and vector_dim != dim:
+                issues.append(
+                    _issue(
+                        record_id,
+                        "error",
+                        "vector_dimension_mismatch",
+                        f"Vector dimension is {vector_dim}, expected {dim}.",
+                        _vector_field_name(record),
+                    )
+                )
+            elif expected_dataset_dim is None:
+                expected_dataset_dim = vector_dim
+            elif vector_dim != expected_dataset_dim:
+                issues.append(
+                    _issue(
+                        record_id,
+                        "error",
+                        "inconsistent_vector_dimension",
+                        (
+                            f"Vector dimension is {vector_dim}, but earlier records use "
+                            f"{expected_dataset_dim}."
+                        ),
+                        _vector_field_name(record),
+                    )
+                )
+
+        validation = RecordValidation(
+            record_id=record_id,
+            metadata_size_bytes=metadata_size,
+            limit_bytes=limit_bytes,
+            vector_dimension=vector_dim,
+            issues=issues,
+        )
+        error_count += validation.error_count
+        warning_count += validation.warning_count
+        if issues and len(problem_records) < top:
+            problem_records.append(validation)
+
+    return ValidationReport(
+        target=normalized_target,
+        limit_bytes=limit_bytes,
+        expected_dim=dim,
+        records=problem_records,
+        total_records_count=total_records,
+        error_count_total=error_count,
+        warning_count_total=warning_count,
+    )
+
+
 def _record_id(
     record: Mapping[str, Any],
     *,

@@ -154,3 +154,27 @@ def test_write_sidecars_rejects_duplicate_paths_in_one_batch(tmp_path: Path) -> 
 
     with pytest.raises(SidecarConflictError, match="Multiple records"):
         write_sidecars(sidecars)
+
+
+def test_fix_records_reports_metadata_savings(tmp_path: Path) -> None:
+    records = [
+        {
+            "id": "doc",
+            "metadata": {"source": "paper.pdf", "chunk_text": "x" * 200},
+        }
+    ]
+
+    result = fix_records(
+        records,
+        FixOptions(
+            target="pinecone",
+            limit_bytes=40 * 1024,
+            sidecar_dir=tmp_path / "sidecar",
+            output_path=tmp_path / "ready.json",
+        ),
+    )
+
+    assert result.savings[0].record_id == "doc"
+    assert result.savings[0].moved_field_count == 1
+    assert result.reduced_bytes > 0
+    assert result.reduction_ratio > 0

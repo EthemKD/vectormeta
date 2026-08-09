@@ -49,3 +49,35 @@ def analyze_records(
         limit_bytes=limit_bytes,
         records=[analyze_record(record, limit_bytes) for record in records],
     )
+
+
+def analyze_records_stream(
+    records: Iterable[Mapping[str, Any]],
+    target: str,
+    limit_bytes: int,
+    *,
+    top: int,
+) -> ScanReport:
+    """Analyze records while keeping only top oversized analyses in memory."""
+    total_records = 0
+    oversized_count = 0
+    top_records: list[RecordAnalysis] = []
+
+    for record in records:
+        total_records += 1
+        analysis = analyze_record(record, limit_bytes)
+        if not analysis.is_oversized:
+            continue
+        oversized_count += 1
+        top_records.append(analysis)
+        top_records.sort(key=lambda item: item.metadata_size_bytes, reverse=True)
+        if len(top_records) > top:
+            top_records.pop()
+
+    return ScanReport(
+        target=target,
+        limit_bytes=limit_bytes,
+        records=top_records,
+        total_records_count=total_records,
+        oversized_records_count=oversized_count,
+    )
