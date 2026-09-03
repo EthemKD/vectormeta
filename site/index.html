@@ -92,15 +92,14 @@
     <main id="top">
       <section class="hero section-band">
         <div class="hero-copy">
-          <p class="version-pill"><span></span> v0.3.0 - MIT License</p>
+          <p class="version-pill"><span></span> v0.4.0 - MIT License</p>
           <h1>
             Stop vector DB metadata
             <span class="accent-text">limit errors</span> before upsert.
           </h1>
           <p class="lede">
-            Scan JSON/JSONL records, validate upsert readiness, move heavy payloads
-            to sidecar stores, and use safe_upsert from Python for cleaner ingestion
-            pipelines.
+            Stream large JSONL record files, validate upsert readiness, move heavy payloads
+            to sidecar stores, and see exactly how much metadata was reduced.
           </p>
           <div class="actions center">
             <a class="button button-primary" href="#workflow">See workflow</a>
@@ -113,20 +112,20 @@
             <span class="dot red"></span>
             <span class="dot amber"></span>
             <span class="dot green"></span>
-            <span>vectormeta - scan + validate + fix + safe_upsert</span>
+            <span>vectormeta - streaming scan + validate + fix</span>
           </div>
           <div class="terminal-body">
-            <p><span class="prompt">$</span> vectormeta scan records.json --target pinecone</p>
+            <p><span class="prompt">$</span> vectormeta scan records.jsonl --target pinecone --stream</p>
             <p class="muted">Target: pinecone  /  Limit: 40960 bytes (40.00 KB)</p>
             <p class="muted">Records scanned: 2  /  <span class="danger">Oversized: 1</span></p>
             <p class="muted indent">
               doc_123_chunk_4 -> 76,747 B; largest fields: chunk_text, raw_html, summary
             </p>
-            <p class="gap"><span class="prompt">$</span> vectormeta validate records.json --target pinecone --dim 1536</p>
+            <p class="gap"><span class="prompt">$</span> vectormeta validate records.jsonl --target pinecone --dim 1536 --stream</p>
             <p class="muted">Records validated: 2  /  <span class="danger">Errors: 1</span></p>
             <p class="muted indent">metadata_too_large -> doc_123_chunk_4</p>
-            <p class="gap"><span class="prompt">$</span> vectormeta fix records.json --target pinecone --sidecar-store sqlite --sidecar sidecars.sqlite --out ready.json</p>
-            <p class="success">Fix summary: updated 2 records; stored content-addressed sidecar refs.<span class="cursor"></span></p>
+            <p class="gap"><span class="prompt">$</span> vectormeta fix records.jsonl --target pinecone --stream --format jsonl --sidecar-store sqlite --sidecar sidecars.sqlite --out ready.jsonl</p>
+            <p class="success">Metadata reduction: 68.4 KB removed; stored content-addressed sidecar refs.<span class="cursor"></span></p>
           </div>
         </div>
       </section>
@@ -369,13 +368,14 @@
           <span>safe_upsert API</span>
           <span>SQLite sidecars</span>
           <span>Content deduplication</span>
-          <span>JSON + JSONL</span>
+          <span>JSON + streaming JSONL</span>
           <span>Pytest tests</span>
           <span>Ruff linting</span>
           <span>Mypy strict</span>
           <span>GitHub Actions CI</span>
           <span>Overwrite protection</span>
           <span>Path traversal checks</span>
+          <span>Streaming scan/fix</span>
           <span>Store-backed sidecars</span>
         </div>
       </section>
@@ -429,7 +429,7 @@
     <footer class="footer">
       <strong class="footer-version">
         <span class="release-icon" aria-hidden="true"></span>
-        vectormeta 0.3.0
+        vectormeta 0.4.0
       </strong>
       <nav aria-label="Footer navigation">
         <a href="https://github.com/Achal13jain/vectormeta/blob/main/docs/architecture.md"
