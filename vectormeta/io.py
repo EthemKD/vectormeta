@@ -59,12 +59,15 @@ def read_records(path: Path) -> tuple[list[Record], InputFormat]:
     _ensure_input_file(path)
 
     text = path.read_text(encoding="utf-8-sig")
-    if not text.strip():
+    stripped = text.lstrip()
+    if not stripped:
         raise InvalidInputError(f"Input file is empty: {path}")
 
     try:
         parsed = json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        if stripped.startswith("["):
+            raise InvalidInputError(f"Invalid JSON array in {path}: {exc}") from exc
         return _read_jsonl(text, path), "jsonl"
 
     if isinstance(parsed, list):
